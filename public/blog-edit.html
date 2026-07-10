@@ -6,6 +6,9 @@
   <title>Blog Manager · Imagebed</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
+  <!-- SimpleMDE — WYSIWYG-ish markdown editor with toolbar, live preview and side-by-side.
+       Loaded from the sparksuite/simplemde-markdown-editor 1.11.2 build on jsdelivr. -->
+  <link href="https://cdn.jsdelivr.net/npm/simplemde@1.11.2/dist/simplemde.min.css" rel="stylesheet"/>
   <link href="/blog.css" rel="stylesheet"/>
   <style>
     body.editor-body { background: #f4f6fa; min-height: 100vh; }
@@ -79,7 +82,7 @@
       display: flex;
       flex-direction: column;
     }
-    .editor-toolbar {
+    .editor-topbar {
       padding: 12px 20px;
       border-bottom: 1px solid #eef1f5;
       display: flex;
@@ -117,6 +120,40 @@
       color: #6c757d; padding: 60px 20px; text-align: center;
     }
     .empty-state i { font-size: 3rem; margin-bottom: 12px; color: #adb5bd; }
+
+    /* ---- SimpleMDE tweaks ----
+       SimpleMDE ships its own CSS which mostly plays well; we just soften
+       the borders/radius so it matches the rest of the Bootstrap form. */
+    .CodeMirror,
+    .editor-toolbar,
+    .editor-preview,
+    .editor-preview-side {
+      border-color: #dee2e6 !important;
+    }
+    .CodeMirror { border-radius: 0 0 6px 6px; min-height: 460px; }
+    .editor-toolbar {
+      border-radius: 6px 6px 0 0;
+      background: #f8f9fa;
+    }
+    /* SimpleMDE's built-in side-by-side/fullscreen preview reuses the same
+       markdown → HTML pipeline, but the classes we styled on the Preview
+       tab (.post-body etc.) are ours — inject a light preview stylesheet
+       inside .editor-preview so images/code look sensible there too. */
+    .editor-preview, .editor-preview-side {
+      background: #fff;
+      padding: 20px;
+      line-height: 1.7;
+    }
+    .editor-preview img, .editor-preview-side img { max-width: 100%; border-radius: 6px; }
+    .editor-preview pre, .editor-preview-side pre {
+      background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; overflow: auto;
+    }
+    .editor-preview code, .editor-preview-side code {
+      background: #f1f3f5; color: #d63384; padding: 1px 5px; border-radius: 4px;
+    }
+    .editor-preview pre code, .editor-preview-side pre code {
+      background: transparent; color: inherit; padding: 0;
+    }
   </style>
 </head>
 <body class="editor-body">
@@ -189,7 +226,7 @@
 
     <!-- Main editor -->
     <section class="editor-main">
-      <div class="editor-toolbar">
+      <div class="editor-topbar">
         <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
           <i class="bi bi-file-earmark-text text-muted"></i>
           <span class="editor-title-badge" id="editTitle">Pick a post from the list or click New.</span>
@@ -260,10 +297,10 @@
               <label class="form-label d-flex align-items-center justify-content-between">
                 <span>Body <span class="text-muted small">(Markdown)</span></span>
                 <span class="text-muted small">
-                  <i class="bi bi-markdown"></i> Supports headings, lists, code, images, links.
+                  <i class="bi bi-markdown"></i> Toolbar: bold, italic, headings, lists, quote, code, link, image, preview, fullscreen.
                 </span>
               </label>
-              <textarea class="form-control" id="fBody" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…"></textarea>
+              <textarea id="fBody" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…"></textarea>
             </div>
           </form>
         </div>
@@ -333,6 +370,7 @@
   <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastArea"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simplemde@1.11.2/dist/simplemde.min.js"></script>
   <script type="module">
     import { renderMarkdown } from "/markdown.js";
 
@@ -355,6 +393,33 @@
 
     const loginModal = new bootstrap.Modal($("loginModal"));
     const catModal   = new bootstrap.Modal($("catModal"));
+
+    // ---------- SimpleMDE (markdown editor) ----------
+    // SimpleMDE wraps the #fBody textarea and gives us a toolbar, live syntax
+    // highlighting, side-by-side / fullscreen preview, and keyboard shortcuts.
+    // Its own preview button uses marked.js (bundled). Our tab-based Preview
+    // pane keeps rendering through /markdown.js so the on-page preview looks
+    // pixel-identical to the deployed blog article.
+    const mde = new SimpleMDE({
+      element: $("fBody"),
+      spellChecker: false,
+      status: ["lines", "words"],
+      autofocus: false,
+      autosave: { enabled: false }, // We do our own save via /api/blog/save.
+      placeholder: "# Hello\n\nWrite your post here…",
+      forceSync: true,              // Keep the underlying textarea's value in sync.
+      toolbar: [
+        "bold", "italic", "heading", "|",
+        "quote", "unordered-list", "ordered-list", "|",
+        "code", "link", "image", "table", "horizontal-rule", "|",
+        "preview", "side-by-side", "fullscreen", "|",
+        "guide",
+      ],
+    });
+    // Small helpers so the rest of the code doesn't need to know about mde.
+    function getBody()  { return mde.value(); }
+    function setBody(v) { mde.value(String(v || "")); }
+
 
     function toast(msg, variant = "primary") {
       const id = "t" + Math.random().toString(36).slice(2, 8);
@@ -431,9 +496,12 @@
       const canEdit = state.authed && !!state.editing;
       $("saveBtn").disabled = !canEdit;
       $("deleteBtn").disabled = !canEdit || !state.editing?.originalKey;
-      ["fCategory", "fDate", "fTitle", "fSlug", "fImage", "fBody"].forEach((id) => {
+      ["fCategory", "fDate", "fTitle", "fSlug", "fImage"].forEach((id) => {
         $(id).disabled = !state.authed;
       });
+      // SimpleMDE exposes CodeMirror; toggle its readOnly flag to match auth.
+      // (We can't just disable the underlying textarea — SimpleMDE hides it.)
+      if (mde && mde.codemirror) mde.codemirror.setOption("readOnly", state.authed ? false : "nocursor");
     }
 
     // ---------- categories ----------
@@ -594,7 +662,11 @@
       $("fTitle").value = state.editing.title;
       $("fSlug").value = state.editing.slug;
       $("fImage").value = state.editing.image;
-      $("fBody").value = state.editing.body;
+      setBody(state.editing.body);
+      // CodeMirror computes its layout off the container's size, so if it was
+      // instantiated while #editForm was display:none it renders with a zero
+      // width. Force a refresh now that the form is visible.
+      if (mde && mde.codemirror) setTimeout(() => mde.codemirror.refresh(), 0);
       $("editTitle").textContent = state.editing.originalKey || "New post (draft)";
       updateEditorEnabled();
       // Switch back to edit tab if user is on preview and starts editing new post.
@@ -604,6 +676,7 @@
     function clearEditor() {
       state.editing = null;
       $("editForm").reset();
+      setBody("");   // Reset doesn't reach into SimpleMDE — clear it explicitly.
       $("editForm").style.display = "none";
       $("emptyState").style.display = "";
       $("editTitle").textContent = "Pick a post from the list or click New.";
@@ -630,7 +703,7 @@
         title: $("fTitle").value.trim(),
         slug: $("fSlug").value.trim() || slugify($("fTitle").value),
         image: $("fImage").value.trim(),
-        body: $("fBody").value,
+        body: getBody(),
         originalKey: state.editing.originalKey || undefined,
       };
       if (!payload.title || !payload.slug || !payload.body.trim()) {
@@ -683,14 +756,20 @@
 
     // ---------- preview ----------
     $("tab-preview").addEventListener("shown.bs.tab", () => {
+      const body = getBody();
       $("prevTitle").textContent = $("fTitle").value || "(untitled)";
       $("prevCat").textContent = $("fCategory").value || "";
-      $("prevMeta").textContent = `${$("fDate").value || ""} · ${estimateReading($("fBody").value)} min read`;
+      $("prevMeta").textContent = `${$("fDate").value || ""} · ${estimateReading(body)} min read`;
       const heroEl = $("prevHero");
       const img = $("fImage").value.trim();
       if (img) { heroEl.style.backgroundImage = `url('${img}')`; heroEl.style.display = ""; }
       else { heroEl.style.display = "none"; }
-      $("prevBody").innerHTML = renderMarkdown($("fBody").value);
+      $("prevBody").innerHTML = renderMarkdown(body);
+    });
+    // When we come BACK to the edit tab, refresh CodeMirror in case its
+    // container was hidden while the preview tab was active.
+    $("tab-edit").addEventListener("shown.bs.tab", () => {
+      if (mde && mde.codemirror) mde.codemirror.refresh();
     });
     function estimateReading(md) {
       const words = String(md || "").split(/\s+/).filter(Boolean).length;
