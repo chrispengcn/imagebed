@@ -255,10 +255,15 @@ function renderFooter() {
   return `
   <footer class="blog-footer border-top mt-5 py-4">
     <div class="container text-center text-muted small">
-      © ${year} Imagebed ·
-      <a class="text-decoration-none" href="/">Gallery</a> ·
-      <a class="text-decoration-none" href="/blog/">Blog</a> ·
-      <a class="text-decoration-none" href="/sitemap.xml">Sitemap</a>
+      <div>
+        © ${year} Imagebed ·
+        <a class="text-decoration-none" href="/">Gallery</a> ·
+        <a class="text-decoration-none" href="/blog/">Blog</a> ·
+        <a class="text-decoration-none" href="/sitemap.xml">Sitemap</a>
+      </div>
+      <div class="mt-1">
+        Design by <a class="text-decoration-none" href="https://shopaii.net" target="_blank" rel="noopener">Shopaii.net</a>
+      </div>
     </div>
   </footer>`;
 }
