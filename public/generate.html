@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Generate · Imagebed</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>📷 Imagebed</h1>
+    <nav>
+      <a href="/">Gallery</a>
+      <a href="/generate.html" class="active">AI Generate</a>
+    </nav>
+    <div class="spacer"></div>
+    <span style="color:var(--muted);font-size:12px" id="modelBadge">—</span>
+    <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <button id="loginBtn" class="ghost">Login</button>
+  </header>
+
+  <div class="gen-wrap">
+    <form class="gen-form" id="form">
+      <div>
+        <label for="model">Model</label>
+        <select id="model"></select>
+        <div id="modelHint" style="color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5"></div>
+      </div>
+
+      <div>
+        <label for="prompt">Prompt (1–2048 characters)</label>
+        <textarea id="prompt" required maxlength="2048" placeholder="e.g. a cyberpunk lizard wearing sunglasses, neon-lit background, surreal"></textarea>
+      </div>
+
+      <div>
+        <label for="folder">Save to folder (leave blank for root)</label>
+        <input type="text" id="folder" placeholder="e.g. ai/2026" />
+      </div>
+
+      <div id="dynFields"></div>
+
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text)">
+        <input type="checkbox" id="save" checked />
+        Save to gallery after generating
+      </label>
+
+      <button type="submit" id="submit">✨ Generate</button>
+    </form>
+
+    <div class="gen-preview" id="preview">
+      <div class="msg">Pick a model, enter a prompt, and click “Generate”.</div>
+    </div>
+  </div>
+
+  <dialog id="loginDialog">
+    <form method="dialog" id="loginForm">
+      <h3 style="margin:0 0 12px">Login</h3>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
+        Enter the admin password to generate images.
+      </p>
+      <input type="password" id="loginPw" placeholder="Password" autocomplete="current-password" required autofocus />
+      <div id="loginError" class="err"></div>
+      <div class="actions">
+        <button type="button" class="ghost" id="loginCancel">Cancel</button>
+        <button type="submit" id="loginSubmit">Login</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module">
+    import { MODELS, DEFAULT_MODEL } from "/models.js";
+
+    const modelSel   = document.getElementById("model");
+    const modelHint  = document.getElementById("modelHint");
+    const modelBadge = document.getElementById("modelBadge");
+    const dynFields  = document.getElementById("dynFields");
+    const form       = document.getElementById("form");
+    const preview    = document.getElementById("preview");
+    const submit     = document.getElementById("submit");
+    const loginBtn   = document.getElementById("loginBtn");
+    const authState  = document.getElementById("authState");
+
+    let authed = false;
+
+    // ---------- auth ----------
+    async function refreshAuth() {
+      try {
+        const res = await fetch("/api/login");
+        const data = await res.json();
+        authed = !!data.authed;
+      } catch { authed = false; }
+      loginBtn.textContent = authed ? "Logout" : "Login";
+      authState.textContent = authed ? "Signed in" : "";
+      submit.disabled = false;
+      submit.title = authed ? "" : "Login required to generate";
+    }
+    loginBtn.addEventListener("click", async () => {
+      if (authed) {
+        await fetch("/api/logout", { method: "POST" });
+        await refreshAuth();
+      } else {
+        openLoginDialog();
+      }
+    });
+
+    const loginDialog = document.getElementById("loginDialog");
+    const loginForm   = document.getElementById("loginForm");
+    const loginPw     = document.getElementById("loginPw");
+    const loginError  = document.getElementById("loginError");
+    document.getElementById("loginCancel").addEventListener("click", () => loginDialog.close());
+    function openLoginDialog() {
+      loginError.textContent = "";
+      loginPw.value = "";
+      if (typeof loginDialog.showModal === "function") loginDialog.showModal();
+      else loginDialog.setAttribute("open", "");
+      setTimeout(() => loginPw.focus(), 0);
+    }
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.textContent = "";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: loginPw.value }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          loginError.textContent = data.error || `Login failed (${res.status})`;
+          return;
+        }
+        loginDialog.close();
+        await refreshAuth();
+      } catch (err) {
+        loginError.textContent = err.message || "Login failed";
+      }
+    });
+
+    // ---------- model form ----------
+    for (const [id, spec] of Object.entries(MODELS)) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = `${spec.label} — ${spec.provider}`;
+      modelSel.appendChild(opt);
+    }
+    modelSel.value = DEFAULT_MODEL;
+
+    function renderModel() {
+      const spec = MODELS[modelSel.value];
+      modelHint.textContent = spec.hint || "";
+      modelBadge.textContent = `Model: ${spec.label}`;
+      dynFields.innerHTML = "";
+      for (const f of spec.fields || []) dynFields.appendChild(renderField(f));
+    }
+    function renderField(f) {
+      const wrap = document.createElement("div");
+      const label = document.createElement("label");
+      label.setAttribute("for", `f-${f.name}`);
+      label.textContent = f.label + (f.min != null || f.max != null ? ` (${f.min ?? "?"}–${f.max ?? "?"})` : "");
+      wrap.appendChild(label);
+      let el;
+      if (f.type === "select") {
+        el = document.createElement("select");
+        for (const opt of f.options) {
+          const o = document.createElement("option");
+          o.value = o.textContent = opt;
+          el.appendChild(o);
+        }
+        el.value = f.default ?? f.options[0];
+      } else if (f.type === "text") {
+        el = document.createElement("input");
+        el.type = "text";
+        if (f.placeholder) el.placeholder = f.placeholder;
+        if (f.default != null) el.value = f.default;
+      } else {
+        el = document.createElement("input");
+        el.type = "number";
+        if (f.min != null)  el.min = f.min;
+        if (f.max != null)  el.max = f.max;
+        if (f.step != null) el.step = f.step;
+        if (f.default != null) el.value = f.default;
+      }
+      el.id = `f-${f.name}`;
+      el.name = f.name;
+      el.dataset.fname = f.name;
+      wrap.appendChild(el);
+      return wrap;
+    }
+    modelSel.addEventListener("change", renderModel);
+    renderModel();
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!authed) { openLoginDialog(); return; }
+
+      const body = {
+        model: modelSel.value,
+        prompt: document.getElementById("prompt").value.trim(),
+        save: document.getElementById("save").checked,
+        folder: document.getElementById("folder").value.trim(),
+      };
+      dynFields.querySelectorAll("[data-fname]").forEach((el) => {
+        if (el.value === "" || el.value == null) return;
+        body[el.dataset.fname] = el.type === "number" ? Number(el.value) : el.value;
+      });
+      if (!body.prompt) return;
+
+      submit.disabled = true;
+      const t0 = performance.now();
+      preview.innerHTML = `<div class="spinner"></div><div class="msg" style="margin-top:12px">Generating with ${escapeHtml(MODELS[body.model].label)}…</div>`;
+
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (res.status === 401) {
+          preview.innerHTML = `<div class="msg" style="color:var(--danger)">Session expired — please log in again.</div>`;
+          await refreshAuth();
+          return;
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        const secs = ((performance.now() - t0) / 1000).toFixed(1);
+        const src = data.url || data.dataURI;
+        const gallery = body.folder ? `<a href="/?folder=${encodeURIComponent(body.folder)}">Open folder</a>` : `<a href="/">Back to gallery</a>`;
+        const savedLine = data.key
+          ? `<div class="msg">Saved: ${escapeHtml(data.key)} · ${secs}s · ${gallery}</div>`
+          : `<div class="msg">Not saved · ${secs}s</div>`;
+        preview.innerHTML = `<img src="${src}" alt="generated" />${savedLine}`;
+      } catch (err) {
+        preview.innerHTML = `<div class="msg" style="color:var(--danger)">Generation failed: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+    // Preselect folder from ?folder= query param.
+    const params = new URLSearchParams(location.search);
+    if (params.get("folder")) document.getElementById("folder").value = params.get("folder");
+
+    refreshAuth();
+  </script>
+</body>
+</html>

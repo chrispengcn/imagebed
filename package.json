@@ -1,0 +1,13 @@
+{
+  "name": "imagebed",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Minimal Cloudflare Pages image bed (R2 + Workers AI flux-1-schnell), no auth, no database.",
+  "scripts": {
+    "dev": "wrangler pages dev public --compatibility-date=2025-01-01 --r2 BUCKET=imagebed --ai AI",
+    "deploy": "wrangler pages deploy public --project-name imagebed"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

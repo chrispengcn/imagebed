@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Imagebed</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>📷 Imagebed</h1>
+    <nav>
+      <a href="/" class="active">Gallery</a>
+      <a href="/generate.html">AI Generate</a>
+    </nav>
+    <div class="spacer"></div>
+    <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <button id="uploadBtn" title="Requires login">Upload</button>
+    <button id="loginBtn" class="ghost">Login</button>
+    <input type="file" id="fileInput" multiple hidden />
+  </header>
+
+  <div class="split">
+    <aside class="list-pane">
+      <div class="list-toolbar">
+        <input type="search" id="search" placeholder="Search by name…" />
+        <button class="ghost" id="refreshBtn" title="Refresh">↻</button>
+      </div>
+
+      <div class="folder-bar">
+        <span class="folder-label">Folder:</span>
+        <div class="crumbs" id="crumbs"></div>
+      </div>
+
+      <div id="drop" class="drop">Drop files here to upload<br/><span id="dropTarget" class="drop-target">→ root</span></div>
+
+      <div class="list" id="list">
+        <div style="padding:20px;color:var(--muted);text-align:center">Loading…</div>
+      </div>
+    </aside>
+
+    <section class="preview-pane">
+      <div class="preview-toolbar">
+        <div class="meta" id="previewMeta">No file selected</div>
+        <button class="ghost" id="copyBtn" disabled>Copy link</button>
+        <a class="btn" id="openBtn" href="#" target="_blank" style="display:none">Open in new tab</a>
+        <div class="dl-group" id="dlGroup" style="display:none">
+          <button class="ghost" id="dlOrigin"    title="Download original bytes as-is">Original</button>
+          <button class="ghost" id="dlJpg"       title="Re-encode to JPEG (lossy)">JPG</button>
+          <button class="ghost" id="dlPng"       title="Re-encode to PNG (lossless)">PNG</button>
+          <button class="ghost" id="dlWebp"      title="Re-encode to WebP">WebP</button>
+        </div>
+        <button class="danger" id="deleteBtn" disabled>Delete</button>
+      </div>
+      <div class="preview-body" id="preview">
+        <div class="empty">Select a file from the left to preview</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Login dialog (native <dialog> — no framework, no polyfill needed on modern browsers) -->
+  <dialog id="loginDialog">
+    <form method="dialog" id="loginForm">
+      <h3 style="margin:0 0 12px">Login</h3>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
+        Enter the admin password to upload, delete, or generate images.
+      </p>
+      <input type="password" id="loginPw" placeholder="Password" autocomplete="current-password" required autofocus />
+      <div id="loginError" class="err"></div>
+      <div class="actions">
+        <button type="button" class="ghost" id="loginCancel">Cancel</button>
+        <button type="submit" id="loginSubmit">Login</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- New-folder prompt (used by "New folder" button in the folder bar) -->
+
+  <script>
+    // ---------- state ----------
+    const listEl       = document.getElementById("list");
+    const previewEl    = document.getElementById("preview");
+    const previewMeta  = document.getElementById("previewMeta");
+    const copyBtn      = document.getElementById("copyBtn");
+    const openBtn      = document.getElementById("openBtn");
+    const deleteBtn    = document.getElementById("deleteBtn");
+    const dlGroup      = document.getElementById("dlGroup");
+    const searchEl     = document.getElementById("search");
+    const fileInput    = document.getElementById("fileInput");
+    const drop         = document.getElementById("drop");
+    const dropTarget   = document.getElementById("dropTarget");
+    const uploadBtn    = document.getElementById("uploadBtn");
+    const loginBtn     = document.getElementById("loginBtn");
+    const authState    = document.getElementById("authState");
+    const crumbsEl     = document.getElementById("crumbs");
+
+    let items = [];
+    let folders = [];
+    let selected = null;
+    let authed = false;
+    let currentFolder = ""; // e.g. "photos/2026"
+
+    // ---------- format helpers ----------
+    const fmtSize = (n) => {
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + " MB";
+      return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+    };
+    const fmtDate = (iso) => {
+      const d = new Date(iso);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const isImage = (ct) => (ct || "").startsWith("image/");
+    const isVideo = (ct) => (ct || "").startsWith("video/");
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+    function escapeAttr(s) { return escapeHtml(s); }
+
+    // ---------- auth ----------
+    async function refreshAuth() {
+      try {
+        const res = await fetch("/api/login");
+        const data = await res.json();
+        authed = !!data.authed;
+      } catch { authed = false; }
+      renderAuth();
+    }
+    function renderAuth() {
+      loginBtn.textContent = authed ? "Logout" : "Login";
+      uploadBtn.disabled = !authed;
+      uploadBtn.title = authed ? "Upload files to the current folder" : "Login required to upload";
+      authState.textContent = authed ? "Signed in" : "";
+      // Delete button gets re-evaluated per-selection; refresh if something is selected.
+      if (selected) selectItem(selected.key);
+    }
+    loginBtn.addEventListener("click", async () => {
+      if (authed) {
+        await fetch("/api/logout", { method: "POST" });
+        toast("Logged out");
+        await refreshAuth();
+      } else {
+        openLoginDialog();
+      }
+    });
+
+    const loginDialog = document.getElementById("loginDialog");
+    const loginForm   = document.getElementById("loginForm");
+    const loginPw     = document.getElementById("loginPw");
+    const loginError  = document.getElementById("loginError");
+    document.getElementById("loginCancel").addEventListener("click", () => loginDialog.close());
+    function openLoginDialog() {
+      loginError.textContent = "";
+      loginPw.value = "";
+      if (typeof loginDialog.showModal === "function") loginDialog.showModal();
+      else loginDialog.setAttribute("open", "");
+      setTimeout(() => loginPw.focus(), 0);
+    }
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.textContent = "";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: loginPw.value }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          loginError.textContent = data.error || `Login failed (${res.status})`;
+          return;
+        }
+        loginDialog.close();
+        toast("Logged in");
+        await refreshAuth();
+      } catch (err) {
+        loginError.textContent = err.message || "Login failed";
+      }
+    });
+
+    // ---------- listing / folders ----------
+    function renderCrumbs() {
+      const segs = currentFolder ? currentFolder.split("/") : [];
+      const parts = [`<button class="crumb" data-path="">root</button>`];
+      let accum = "";
+      for (const s of segs) {
+        accum = accum ? `${accum}/${s}` : s;
+        parts.push(`<span class="crumb-sep">/</span><button class="crumb" data-path="${escapeAttr(accum)}">${escapeHtml(s)}</button>`);
+      }
+      parts.push(`<button class="crumb new-folder" id="newFolderBtn" title="Create/enter a new folder">+ new</button>`);
+      crumbsEl.innerHTML = parts.join("");
+      dropTarget.textContent = "→ " + (currentFolder ? currentFolder + "/" : "root");
+    }
+    crumbsEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("button.crumb");
+      if (!btn) return;
+      if (btn.id === "newFolderBtn") return promptNewFolder();
+      currentFolder = btn.dataset.path || "";
+      selected = null;
+      previewMeta.textContent = "No file selected";
+      previewEl.innerHTML = `<div class="empty">Select a file from the left to preview</div>`;
+      copyBtn.disabled = deleteBtn.disabled = true;
+      openBtn.style.display = "none";
+      dlGroup.style.display = "none";
+      load();
+    });
+    function promptNewFolder() {
+      const name = prompt("New folder name (letters, numbers, dashes, underscores):");
+      if (!name) return;
+      const clean = name.replace(/^\/+|\/+$/g, "").replace(/[^\w.\-\/]+/g, "_");
+      if (!clean) return;
+      currentFolder = currentFolder ? `${currentFolder}/${clean}` : clean;
+      renderCrumbs();
+      toast(`Now uploading to: ${currentFolder}/`);
+      // A folder only exists when it has an object in it — nothing to fetch yet.
+      folders = []; items = [];
+      render();
+    }
+
+    function render() {
+      const q = searchEl.value.trim().toLowerCase();
+      const shownFolders = folders.filter((f) => !q || f.toLowerCase().includes(q));
+      const shownFiles = q ? items.filter((i) => i.key.toLowerCase().includes(q)) : items;
+
+      let html = "";
+      for (const f of shownFolders) {
+        const target = currentFolder ? `${currentFolder}/${f}` : f;
+        html += `
+          <div class="file-row folder-row" data-folder="${escapeAttr(target)}">
+            <div class="name">📁 ${escapeHtml(f)}</div>
+            <div class="size"></div>
+            <div class="date">folder</div>
+          </div>`;
+      }
+      for (const i of shownFiles) {
+        const displayName = i.key.slice((currentFolder ? currentFolder.length + 1 : 0));
+        html += `
+          <div class="file-row${selected?.key === i.key ? " active" : ""}" data-key="${escapeAttr(i.key)}">
+            <div class="name" title="${escapeAttr(i.key)}">${escapeHtml(displayName)}</div>
+            <div class="size">${fmtSize(i.size)}</div>
+            <div class="date">${fmtDate(i.uploaded)}</div>
+          </div>`;
+      }
+      if (!html) {
+        html = `<div style="padding:20px;color:var(--muted);text-align:center">${items.length || folders.length ? "No matches" : "No files here yet"}</div>`;
+      }
+      listEl.innerHTML = html;
+    }
+
+    async function load() {
+      renderCrumbs();
+      listEl.innerHTML = `<div style="padding:20px;color:var(--muted);text-align:center">Loading…</div>`;
+      try {
+        const res = await fetch(`/api/list?prefix=${encodeURIComponent(currentFolder)}`);
+        const data = await res.json();
+        items = data.items || [];
+        folders = data.folders || [];
+      } catch (e) {
+        listEl.innerHTML = `<div style="padding:20px;color:var(--danger);text-align:center">Failed to load: ${e.message}</div>`;
+        return;
+      }
+      render();
+    }
+
+    function selectItem(key) {
+      const item = items.find((i) => i.key === key);
+      if (!item) return;
+      selected = item;
+      render();
+      previewMeta.textContent = `${item.key} · ${fmtSize(item.size)} · ${fmtDate(item.uploaded)}`;
+      copyBtn.disabled = false;
+      deleteBtn.disabled = !authed;
+      deleteBtn.title = authed ? "" : "Login required to delete";
+      openBtn.href = item.url;
+      openBtn.style.display = "";
+      dlGroup.style.display = isImage(item.contentType) ? "" : "none";
+      if (isImage(item.contentType)) {
+        previewEl.innerHTML = `<img src="${item.url}" alt="${escapeAttr(item.key)}" />`;
+      } else if (isVideo(item.contentType)) {
+        previewEl.innerHTML = `<video src="${item.url}" controls autoplay muted></video>`;
+      } else {
+        previewEl.innerHTML = `<div class="empty">Preview not supported for this type (${escapeHtml(item.contentType)})<br/><a class="btn" href="${item.url}" target="_blank" style="margin-top:12px;display:inline-block">Download</a></div>`;
+      }
+    }
+
+    listEl.addEventListener("click", (e) => {
+      const folder = e.target.closest(".folder-row");
+      if (folder) {
+        currentFolder = folder.dataset.folder;
+        selected = null;
+        previewMeta.textContent = "No file selected";
+        previewEl.innerHTML = `<div class="empty">Select a file from the left to preview</div>`;
+        copyBtn.disabled = deleteBtn.disabled = true;
+        openBtn.style.display = "none";
+        dlGroup.style.display = "none";
+        load();
+        return;
+      }
+      const row = e.target.closest(".file-row");
+      if (row && row.dataset.key) selectItem(row.dataset.key);
+    });
+
+    searchEl.addEventListener("input", render);
+    document.getElementById("refreshBtn").addEventListener("click", load);
+
+    copyBtn.addEventListener("click", async () => {
+      if (!selected) return;
+      const abs = new URL(selected.url, location.origin).toString();
+      try { await navigator.clipboard.writeText(abs); toast("Copied"); }
+      catch { toast("Copy failed"); }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!selected) return;
+      if (!authed) return toast("Login required");
+      if (!confirm(`Delete ${selected.key}?`)) return;
+      const res = await fetch("/api/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: selected.key }),
+      });
+      if (res.status === 401) { toast("Session expired — please log in again"); await refreshAuth(); return; }
+      if (!res.ok) return toast("Delete failed");
+      selected = null;
+      previewMeta.textContent = "No file selected";
+      previewEl.innerHTML = `<div class="empty">Select a file from the left to preview</div>`;
+      copyBtn.disabled = deleteBtn.disabled = true;
+      openBtn.style.display = "none";
+      dlGroup.style.display = "none";
+      await load();
+    });
+
+    // --- download (original + JPG / PNG / WebP re-encoded via canvas) ---
+    document.getElementById("dlOrigin").addEventListener("click", () => downloadOriginal());
+    document.getElementById("dlJpg").addEventListener("click",   () => downloadAs("image/jpeg", "jpg", 0.92));
+    document.getElementById("dlPng").addEventListener("click",   () => downloadAs("image/png",  "png"));
+    document.getElementById("dlWebp").addEventListener("click",  () => downloadAs("image/webp", "webp", 0.92));
+
+    async function downloadOriginal() {
+      if (!selected) return;
+      toast("Preparing download…");
+      try {
+        const res = await fetch(selected.url);
+        const blob = await res.blob();
+        saveBlob(blob, stripKeyPath(selected.key));
+      } catch (e) { toast("Download failed"); }
+    }
+
+    async function downloadAs(mime, ext, quality) {
+      if (!selected) return;
+      toast(`Encoding ${ext.toUpperCase()}…`);
+      try {
+        const img = await loadImage(selected.url);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (mime === "image/jpeg") {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(img, 0, 0);
+        const blob = await new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error(`toBlob returned null for ${mime}`))),
+            mime,
+            quality
+          );
+        });
+        saveBlob(blob, replaceExt(stripKeyPath(selected.key), ext));
+      } catch (e) {
+        toast(`Conversion failed: ${e.message}`);
+      }
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("image failed to load"));
+        img.src = src;
+      });
+    }
+    function saveBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function stripKeyPath(key) { const i = key.lastIndexOf("/"); return i >= 0 ? key.slice(i + 1) : key; }
+    function replaceExt(name, ext) { const dot = name.lastIndexOf("."); return (dot > 0 ? name.slice(0, dot) : name) + "." + ext; }
+
+    // --- upload ---
+    uploadBtn.addEventListener("click", () => {
+      if (!authed) return openLoginDialog();
+      fileInput.click();
+    });
+    fileInput.addEventListener("change", () => upload(fileInput.files));
+    ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hover"); }));
+    ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hover"); }));
+    drop.addEventListener("drop", (e) => upload(e.dataTransfer.files));
+    drop.addEventListener("click", () => {
+      if (!authed) return openLoginDialog();
+      fileInput.click();
+    });
+
+    async function upload(files) {
+      if (!files || !files.length) return;
+      if (!authed) { openLoginDialog(); return; }
+      const fd = new FormData();
+      for (const f of files) fd.append("file", f);
+      if (currentFolder) fd.append("folder", currentFolder);
+      toast(`Uploading ${files.length} file(s) to ${currentFolder || "root"}…`);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (res.status === 401) { toast("Session expired — please log in again"); await refreshAuth(); return; }
+      if (!res.ok) return toast("Upload failed");
+      const data = await res.json();
+      toast(`Uploaded ${data.uploaded.length} file(s)`);
+      fileInput.value = "";
+      await load();
+      if (data.uploaded[0]) selectItem(data.uploaded[0].key);
+    }
+
+    function toast(msg) {
+      const el = document.createElement("div");
+      el.className = "toast";
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2200);
+    }
+
+    // ---------- boot ----------
+    (async function boot() {
+      // Deep link ?folder=photos/2026
+      const params = new URLSearchParams(location.search);
+      currentFolder = (params.get("folder") || "").replace(/^\/+|\/+$/g, "");
+      await refreshAuth();
+      await load();
+    })();
+  </script>
+</body>
+</html>

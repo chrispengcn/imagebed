@@ -1,0 +1,17 @@
+name = "imagebed"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "public"
+
+# R2 bucket for storing images. Create with:
+#   npx wrangler r2 bucket create imagebed
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "imagebed"
+
+# Workers AI binding — used by /api/generate for the AI image models.
+[ai]
+binding = "AI"
+
+# ADMIN_PASSWORD is set as a secret (NOT here in plaintext). Create with:
+#   npx wrangler pages secret put ADMIN_PASSWORD --project-name imagebed
+# When ADMIN_PASSWORD is unset, upload/delete/generate return 503.
