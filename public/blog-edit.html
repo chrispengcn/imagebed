@@ -1,117 +1,338 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Blog Manager · Imagebed</title>
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-  <header>
-    <h1>📷 Imagebed</h1>
-    <nav>
-      <a href="/">Gallery</a>
-      <a href="/generate.html">AI Generate</a>
-      <a href="/blog/">Blog</a>
-      <a href="/blog-edit.html" class="active">Manage</a>
-      <a href="/help.html">Help</a>
-    </nav>
-    <div class="spacer"></div>
-    <span id="authState" style="color:var(--muted);font-size:12px"></span>
-    <a id="settingsLink" class="ghost btn" href="/settings.html" style="display:none" title="Change password">⚙ Settings</a>
-    <button id="loginBtn" class="ghost">Login</button>
-  </header>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
+  <link href="/blog.css" rel="stylesheet"/>
+  <style>
+    body.editor-body { background: #f4f6fa; min-height: 100vh; }
+    .editor-nav { background: #fff; }
+    .editor-shell {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    @media (max-width: 991.98px) {
+      .editor-shell { grid-template-columns: 1fr; }
+      .editor-side { position: static; }
+    }
+    .editor-side {
+      background: #fff;
+      border: 1px solid #e5e9f0;
+      border-radius: 10px;
+      padding: 16px;
+      max-height: calc(100vh - 100px);
+      overflow: auto;
+      position: sticky;
+      top: 76px;
+    }
+    .side-heading {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6c757d;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .cat-chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      color: #495057;
+      background: #f1f3f5;
+      border: 1px solid transparent;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .cat-chip-btn:hover { background: #e9ecef; }
+    .cat-chip-btn.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+    .post-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      margin-bottom: 2px;
+    }
+    .post-item:hover { background: #f8f9fa; }
+    .post-item.active { background: #e7f1ff; border-color: #b6d4fe; }
+    .post-item-title { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .post-item-meta { color: #6c757d; font-size: 12px; margin-top: 2px; }
 
-  <div class="blog-edit-wrap">
-    <!-- Left: category + post list -->
-    <aside class="blog-edit-side">
-      <div class="side-block">
-        <div class="side-block-head">
-          <strong>Categories</strong>
-          <button class="ghost" id="newCatBtn" title="Create category">+ new</button>
+    .editor-main {
+      background: #fff;
+      border: 1px solid #e5e9f0;
+      border-radius: 10px;
+      min-height: calc(100vh - 100px);
+      display: flex;
+      flex-direction: column;
+    }
+    .editor-toolbar {
+      padding: 12px 20px;
+      border-bottom: 1px solid #eef1f5;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .editor-title-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #6c757d;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 400px;
+    }
+    .editor-body-form { padding: 20px 24px; flex: 1; }
+    .editor-body-form textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      min-height: 460px;
+      line-height: 1.6;
+    }
+    .form-hint { color: #6c757d; font-size: 12px; margin-top: 2px; }
+
+    /* Preview mirrors the public blog styling so the author sees the final look. */
+    #editorPreview { padding: 30px 40px; background: #fff; }
+    #editorPreview .post-hero {
+      height: 260px; border-radius: 10px; margin-bottom: 24px;
+      background-size: cover; background-position: center; background-color: #e9ecef;
+    }
+
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #6c757d; padding: 60px 20px; text-align: center;
+    }
+    .empty-state i { font-size: 3rem; margin-bottom: 12px; color: #adb5bd; }
+  </style>
+</head>
+<body class="editor-body">
+  <!-- Top navbar -->
+  <nav class="navbar navbar-expand-lg editor-nav border-bottom sticky-top">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand fw-bold" href="/blog/">
+        <span class="text-primary">📷</span> Imagebed
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topnav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="topnav">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item"><a class="nav-link" href="/">Gallery</a></li>
+          <li class="nav-item"><a class="nav-link" href="/generate.html">AI Generate</a></li>
+          <li class="nav-item"><a class="nav-link" href="/blog/">Blog</a></li>
+          <li class="nav-item"><a class="nav-link active" href="/blog-edit.html">Manage</a></li>
+          <li class="nav-item"><a class="nav-link" href="/help.html">Help</a></li>
+        </ul>
+        <div class="d-flex align-items-center gap-2">
+          <span id="authState" class="text-muted small"></span>
+          <a id="settingsLink" class="btn btn-outline-secondary btn-sm" href="/settings.html" style="display:none">
+            <i class="bi bi-gear"></i> Settings
+          </a>
+          <button id="loginBtn" class="btn btn-primary btn-sm">Login</button>
         </div>
-        <div id="catList" class="cat-list"><div class="muted small">Loading…</div></div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="editor-shell">
+    <!-- Sidebar -->
+    <aside class="editor-side">
+      <!-- Categories -->
+      <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="side-heading mb-0">Categories</span>
+          <button class="btn btn-sm btn-outline-primary" id="newCatBtn" title="Create category">
+            <i class="bi bi-plus-lg"></i>
+          </button>
+        </div>
+        <div id="catList" class="d-flex flex-wrap gap-2">
+          <span class="text-muted small">Loading…</span>
+        </div>
       </div>
 
-      <div class="side-block">
-        <div class="side-block-head">
-          <strong>Posts</strong>
-          <button class="ghost" id="newPostBtn">+ new post</button>
+      <!-- Posts -->
+      <div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="side-heading mb-0">Posts</span>
+          <button class="btn btn-sm btn-primary" id="newPostBtn">
+            <i class="bi bi-plus-lg"></i> New
+          </button>
         </div>
-        <input type="search" id="listSearch" placeholder="Search title / body…" style="width:100%;margin-bottom:8px" />
-        <div id="postList" class="post-list-editor"><div class="muted small">Loading…</div></div>
-        <div class="pager">
-          <button class="ghost" id="prevBtn" disabled>← Prev</button>
-          <span id="pageInfo" class="muted small"></span>
-          <button class="ghost" id="nextBtn" disabled>Next →</button>
+        <div class="input-group input-group-sm mb-2">
+          <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+          <input type="search" id="listSearch" class="form-control" placeholder="Search title / body…"/>
+        </div>
+        <div id="postList">
+          <div class="text-muted small py-3 text-center">Loading…</div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <button class="btn btn-sm btn-outline-secondary" id="prevBtn" disabled>← Prev</button>
+          <span id="pageInfo" class="text-muted small"></span>
+          <button class="btn btn-sm btn-outline-secondary" id="nextBtn" disabled>Next →</button>
         </div>
       </div>
     </aside>
 
-    <!-- Right: editor -->
-    <section class="blog-edit-main">
-      <div class="edit-toolbar">
-        <span id="editTitle" class="muted">Pick a post from the list or click “+ new post”.</span>
-        <div class="spacer"></div>
-        <div class="mode-toggle">
-          <button class="ghost active" id="modeEdit">Edit</button>
-          <button class="ghost" id="modePreview">Preview</button>
+    <!-- Main editor -->
+    <section class="editor-main">
+      <div class="editor-toolbar">
+        <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+          <i class="bi bi-file-earmark-text text-muted"></i>
+          <span class="editor-title-badge" id="editTitle">Pick a post from the list or click New.</span>
         </div>
-        <button class="ghost" id="saveBtn" disabled>Save</button>
-        <button class="danger" id="deleteBtn" disabled>Delete</button>
+        <ul class="nav nav-pills nav-fill" id="modeTabs" role="tablist" style="min-width:180px">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-edit" data-bs-toggle="tab" data-bs-target="#pane-edit" type="button">
+              <i class="bi bi-pencil"></i> Edit
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-preview" data-bs-toggle="tab" data-bs-target="#pane-preview" type="button">
+              <i class="bi bi-eye"></i> Preview
+            </button>
+          </li>
+        </ul>
+        <button class="btn btn-primary" id="saveBtn" disabled>
+          <i class="bi bi-check2"></i> Save
+        </button>
+        <button class="btn btn-outline-danger" id="deleteBtn" disabled title="Delete this post">
+          <i class="bi bi-trash"></i>
+        </button>
       </div>
 
-      <form class="edit-form" id="editForm">
-        <div class="edit-row">
-          <label>Category
-            <select id="fCategory" required></select>
-          </label>
-          <label>Date
-            <input type="date" id="fDate" required />
-          </label>
-        </div>
-        <div class="edit-row">
-          <label style="flex:2">Title
-            <input type="text" id="fTitle" placeholder="Post title" required />
-          </label>
-          <label style="flex:1">Slug
-            <input type="text" id="fSlug" placeholder="url-slug" required />
-          </label>
-        </div>
-        <label>Featured image URL
-          <input type="text" id="fImage" placeholder="e.g. /file/photos/hero.jpg" />
-        </label>
-        <label>Body (Markdown)
-          <textarea id="fBody" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…"></textarea>
-        </label>
-      </form>
+      <div class="tab-content flex-grow-1">
+        <!-- EDIT PANE -->
+        <div class="tab-pane fade show active" id="pane-edit" role="tabpanel">
+          <div id="emptyState" class="empty-state">
+            <i class="bi bi-file-earmark-plus"></i>
+            <h5>No post selected</h5>
+            <p class="mb-3">Pick a post from the list, or start a new one.</p>
+            <button class="btn btn-primary" id="emptyNewBtn">
+              <i class="bi bi-plus-lg"></i> New post
+            </button>
+          </div>
 
-      <div class="edit-preview" id="editPreview" hidden>
-        <article class="blog-wrap post">
-          <h1 id="prevTitle"></h1>
-          <p class="post-meta" id="prevMeta"></p>
-          <img class="post-feature" id="prevImage" style="display:none" />
-          <div class="post-body" id="prevBody"></div>
-        </article>
+          <form class="editor-body-form" id="editForm" style="display:none">
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Category</label>
+                <select class="form-select" id="fCategory" required></select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Date</label>
+                <input type="date" class="form-control" id="fDate" required/>
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-8">
+                <label class="form-label">Title</label>
+                <input type="text" class="form-control form-control-lg" id="fTitle" placeholder="Post title" required/>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Slug</label>
+                <input type="text" class="form-control" id="fSlug" placeholder="url-slug" required/>
+                <div class="form-hint">URL: /blog/&lt;cat&gt;/YYYY-MM-DD-&lt;slug&gt;/</div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Featured image URL <span class="text-muted small">(optional)</span></label>
+              <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-image"></i></span>
+                <input type="text" class="form-control" id="fImage" placeholder="/file/photos/hero.jpg"/>
+              </div>
+              <div class="form-hint">Upload your image on the <a href="/" target="_blank">Gallery</a> page, then paste its URL here.</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label d-flex align-items-center justify-content-between">
+                <span>Body <span class="text-muted small">(Markdown)</span></span>
+                <span class="text-muted small">
+                  <i class="bi bi-markdown"></i> Supports headings, lists, code, images, links.
+                </span>
+              </label>
+              <textarea class="form-control" id="fBody" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…"></textarea>
+            </div>
+          </form>
+        </div>
+
+        <!-- PREVIEW PANE -->
+        <div class="tab-pane fade" id="pane-preview" role="tabpanel">
+          <article id="editorPreview">
+            <div class="post-hero" id="prevHero" style="display:none"></div>
+            <span class="badge rounded-pill text-bg-primary mb-2" id="prevCat"></span>
+            <h1 class="display-6 fw-bold mb-2" id="prevTitle"></h1>
+            <p class="text-muted small mb-4" id="prevMeta"></p>
+            <div class="post-body" id="prevBody"></div>
+          </article>
+        </div>
       </div>
     </section>
   </div>
 
-  <dialog id="loginDialog">
-    <form method="dialog" id="loginForm">
-      <h3 style="margin:0 0 12px">Login</h3>
-      <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
-        Enter the admin password to manage blog posts.
-      </p>
-      <input type="password" id="loginPw" placeholder="Password" autocomplete="current-password" required autofocus />
-      <div id="loginError" class="err"></div>
-      <div class="actions">
-        <button type="button" class="ghost" id="loginCancel">Cancel</button>
-        <button type="submit" id="loginSubmit">Login</button>
+  <!-- Login dialog -->
+  <div class="modal fade" id="loginModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form id="loginForm">
+          <div class="modal-header">
+            <h5 class="modal-title">Sign in</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted small">Enter the admin password to manage blog posts.</p>
+            <input type="password" id="loginPw" class="form-control" placeholder="Password" autocomplete="current-password" required/>
+            <div id="loginError" class="text-danger small mt-2"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Sign in</button>
+          </div>
+        </form>
       </div>
-    </form>
-  </dialog>
+    </div>
+  </div>
 
+  <!-- Category prompt -->
+  <div class="modal fade" id="catModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form id="catForm">
+          <div class="modal-header">
+            <h5 class="modal-title">New category</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label small">Category name</label>
+            <input type="text" id="catName" class="form-control" required autocomplete="off"/>
+            <div class="form-hint">Letters, digits, dashes — CJK is fine too. Kept as the directory name in R2.</div>
+            <div id="catError" class="text-danger small mt-2"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastArea"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script type="module">
     import { renderMarkdown } from "/markdown.js";
 
@@ -119,37 +340,37 @@
     const state = {
       authed: false,
       categories: [],
-      posts: [],        // page currently in view
+      posts: [],
       total: 0,
       offset: 0,
-      limit: 20,        // client page size; server cap is 100
+      limit: 20,
       q: "",
-      selectedCategory: "",  // filter for listing
-      editing: null,    // {key?, category, date, slug, title, image, body, originalKey?}
+      selectedCategory: "",
+      editing: null,
     };
 
     const $ = (id) => document.getElementById(id);
-    const listEl = $("postList");
-    const catListEl = $("catList");
-    const editTitle = $("editTitle");
-    const saveBtn = $("saveBtn");
-    const deleteBtn = $("deleteBtn");
-    const authState = $("authState");
-    const loginBtn = $("loginBtn");
+    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const escapeAttr = escapeHtml;
 
-    const fCategory = $("fCategory");
-    const fDate = $("fDate");
-    const fTitle = $("fTitle");
-    const fSlug = $("fSlug");
-    const fImage = $("fImage");
-    const fBody = $("fBody");
+    const loginModal = new bootstrap.Modal($("loginModal"));
+    const catModal   = new bootstrap.Modal($("catModal"));
 
-    const modeEdit = $("modeEdit");
-    const modePreview = $("modePreview");
-    const editForm = $("editForm");
-    const editPreview = $("editPreview");
-
-    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+    function toast(msg, variant = "primary") {
+      const id = "t" + Math.random().toString(36).slice(2, 8);
+      const html = `
+        <div class="toast align-items-center text-bg-${variant} border-0" id="${id}" role="alert">
+          <div class="d-flex">
+            <div class="toast-body">${escapeHtml(msg)}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+          </div>
+        </div>`;
+      $("toastArea").insertAdjacentHTML("beforeend", html);
+      const el = $(id);
+      const t = new bootstrap.Toast(el, { delay: 3000 });
+      t.show();
+      el.addEventListener("hidden.bs.toast", () => el.remove());
+    }
 
     function slugify(s) {
       return String(s || "")
@@ -171,49 +392,47 @@
         const data = await res.json();
         state.authed = !!data.authed;
       } catch { state.authed = false; }
-      loginBtn.textContent = state.authed ? "Logout" : "Login";
-      authState.textContent = state.authed ? "Signed in" : "";
-      document.getElementById("settingsLink").style.display = state.authed ? "" : "none";
+      const btn = $("loginBtn");
+      btn.textContent = state.authed ? "Logout" : "Login";
+      btn.classList.toggle("btn-primary", !state.authed);
+      btn.classList.toggle("btn-outline-secondary", state.authed);
+      $("authState").textContent = state.authed ? "Signed in" : "";
+      $("settingsLink").style.display = state.authed ? "" : "none";
       updateEditorEnabled();
     }
-    loginBtn.addEventListener("click", async () => {
-      if (state.authed) { await fetch("/api/logout", { method: "POST" }); await refreshAuth(); }
-      else openLoginDialog();
+    $("loginBtn").addEventListener("click", async () => {
+      if (state.authed) { await fetch("/api/logout", { method: "POST" }); await refreshAuth(); toast("Signed out", "secondary"); }
+      else loginModal.show();
     });
-    const loginDialog = $("loginDialog");
-    const loginForm = $("loginForm");
-    const loginPw = $("loginPw");
-    const loginError = $("loginError");
-    $("loginCancel").addEventListener("click", () => loginDialog.close());
-    function openLoginDialog() {
-      loginError.textContent = ""; loginPw.value = "";
-      if (typeof loginDialog.showModal === "function") loginDialog.showModal();
-      else loginDialog.setAttribute("open", "");
-      setTimeout(() => loginPw.focus(), 0);
-    }
-    loginForm.addEventListener("submit", async (e) => {
+    $("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      loginError.textContent = "";
-      const res = await fetch("/api/login", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password: loginPw.value }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        loginError.textContent = data.error || `Login failed (${res.status})`;
-        return;
+      $("loginError").textContent = "";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: $("loginPw").value }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          $("loginError").textContent = data.error || `Login failed (${res.status})`;
+          return;
+        }
+        loginModal.hide();
+        $("loginPw").value = "";
+        await refreshAuth();
+        await loadAll();
+        toast("Signed in", "success");
+      } catch (err) {
+        $("loginError").textContent = err.message || "Login failed";
       }
-      loginDialog.close();
-      await refreshAuth();
-      await loadAll();
     });
 
     function updateEditorEnabled() {
       const canEdit = state.authed && !!state.editing;
-      saveBtn.disabled = !canEdit;
-      deleteBtn.disabled = !canEdit || !state.editing?.originalKey;
-      [fCategory, fDate, fTitle, fSlug, fImage, fBody].forEach((el) => {
-        el.disabled = !state.authed;
+      $("saveBtn").disabled = !canEdit;
+      $("deleteBtn").disabled = !canEdit || !state.editing?.originalKey;
+      ["fCategory", "fDate", "fTitle", "fSlug", "fImage", "fBody"].forEach((id) => {
+        $(id).disabled = !state.authed;
       });
     }
 
@@ -225,46 +444,56 @@
         state.categories = data.categories || [];
       } catch { state.categories = []; }
       renderCategories();
-      // Refresh the <select> in the editor.
-      const cur = fCategory.value;
-      fCategory.innerHTML = state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
-      if (cur && state.categories.includes(cur)) fCategory.value = cur;
+      const cur = $("fCategory").value;
+      $("fCategory").innerHTML = state.categories.map((c) => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join("");
+      if (cur && state.categories.includes(cur)) $("fCategory").value = cur;
     }
     function renderCategories() {
-      let html = `<a class="cat-chip${state.selectedCategory === "" ? " active" : ""}" data-cat="">All</a>`;
+      let html = `<button type="button" class="cat-chip-btn${state.selectedCategory === "" ? " active" : ""}" data-cat="">All</button>`;
       for (const c of state.categories) {
-        html += `<a class="cat-chip${state.selectedCategory === c ? " active" : ""}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+        html += `<button type="button" class="cat-chip-btn${state.selectedCategory === c ? " active" : ""}" data-cat="${escapeAttr(c)}">${escapeHtml(c)}</button>`;
       }
-      catListEl.innerHTML = html || `<div class="muted small">No categories yet. Create one to publish a post.</div>`;
+      if (!state.categories.length) html += `<span class="text-muted small">No categories yet.</span>`;
+      $("catList").innerHTML = html;
     }
-    catListEl.addEventListener("click", (e) => {
-      const chip = e.target.closest(".cat-chip");
+    $("catList").addEventListener("click", (e) => {
+      const chip = e.target.closest(".cat-chip-btn");
       if (!chip) return;
       state.selectedCategory = chip.dataset.cat;
       state.offset = 0;
       renderCategories();
       loadPosts();
     });
-    $("newCatBtn").addEventListener("click", async () => {
-      if (!state.authed) return openLoginDialog();
-      const name = prompt("New category name:");
+    $("newCatBtn").addEventListener("click", () => {
+      if (!state.authed) return loginModal.show();
+      $("catName").value = ""; $("catError").textContent = "";
+      catModal.show();
+      setTimeout(() => $("catName").focus(), 200);
+    });
+    $("catForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("catError").textContent = "";
+      const name = $("catName").value.trim();
       if (!name) return;
-      const res = await fetch("/api/blog/category", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), action: "create" }),
-      });
-      if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/blog/category", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name, action: "create" }),
+        });
+        if (res.status === 401) { await refreshAuth(); catModal.hide(); loginModal.show(); return; }
         const data = await res.json().catch(() => ({}));
-        alert(data.error || `Failed (${res.status})`);
-        return;
+        if (!res.ok) { $("catError").textContent = data.error || `Failed (${res.status})`; return; }
+        catModal.hide();
+        await loadCategories();
+        toast(`Category "${name}" created`, "success");
+      } catch (err) {
+        $("catError").textContent = err.message || "Failed";
       }
-      await loadCategories();
     });
 
     // ---------- posts list ----------
     async function loadPosts() {
-      listEl.innerHTML = `<div class="muted small">Loading…</div>`;
+      $("postList").innerHTML = '<div class="text-muted small py-3 text-center"><div class="spinner-border spinner-border-sm me-1"></div> Loading…</div>';
       const params = new URLSearchParams();
       if (state.selectedCategory) params.set("category", state.selectedCategory);
       if (state.q) params.set("q", state.q);
@@ -276,30 +505,30 @@
         state.posts = data.items || [];
         state.total = data.total || 0;
       } catch (e) {
-        listEl.innerHTML = `<div class="err">Failed to load: ${escapeHtml(e.message)}</div>`;
+        $("postList").innerHTML = `<div class="alert alert-danger py-2 small">Failed: ${escapeHtml(e.message)}</div>`;
         return;
       }
       renderPosts();
     }
     function renderPosts() {
       if (!state.posts.length) {
-        listEl.innerHTML = `<div class="muted small">No posts.</div>`;
+        $("postList").innerHTML = '<div class="text-muted small py-3 text-center">No posts.</div>';
       } else {
-        listEl.innerHTML = state.posts.map((p) => `
-          <div class="post-list-row${state.editing?.originalKey === p.key ? " active" : ""}" data-key="${escapeHtml(p.key)}">
-            <div class="row-title">${escapeHtml(p.title)}</div>
-            <div class="row-meta">${escapeHtml(p.date)} · ${escapeHtml(p.category)}</div>
-          </div>
+        $("postList").innerHTML = state.posts.map((p) => `
+          <a class="post-item${state.editing?.originalKey === p.key ? " active" : ""}" data-key="${escapeAttr(p.key)}">
+            <div class="post-item-title">${escapeHtml(p.title)}</div>
+            <div class="post-item-meta"><i class="bi bi-calendar3"></i> ${escapeHtml(p.date)} · <span class="text-primary">${escapeHtml(p.category)}</span></div>
+          </a>
         `).join("");
       }
       const from = state.total === 0 ? 0 : state.offset + 1;
       const to = Math.min(state.total, state.offset + state.posts.length);
-      $("pageInfo").textContent = state.total ? `${from}–${to} of ${state.total}` : "";
+      $("pageInfo").textContent = state.total ? `${from}–${to} / ${state.total}` : "";
       $("prevBtn").disabled = state.offset <= 0;
       $("nextBtn").disabled = state.offset + state.limit >= state.total;
     }
-    listEl.addEventListener("click", (e) => {
-      const row = e.target.closest(".post-list-row");
+    $("postList").addEventListener("click", (e) => {
+      const row = e.target.closest(".post-item");
       if (!row) return;
       openPost(row.dataset.key);
     });
@@ -309,11 +538,7 @@
     let searchDeb;
     $("listSearch").addEventListener("input", (e) => {
       clearTimeout(searchDeb);
-      searchDeb = setTimeout(() => {
-        state.q = e.target.value.trim();
-        state.offset = 0;
-        loadPosts();
-      }, 250);
+      searchDeb = setTimeout(() => { state.q = e.target.value.trim(); state.offset = 0; loadPosts(); }, 250);
     });
 
     // ---------- editor ----------
@@ -332,7 +557,7 @@
           body: data.body || "",
         };
       } catch (e) {
-        alert("Failed to load post: " + e.message);
+        toast("Failed to load post: " + e.message, "danger");
         return;
       }
       hydrateForm();
@@ -342,74 +567,87 @@
       const today = new Date();
       const pad = (n) => String(n).padStart(2, "0");
       const dstr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+      const cat = state.selectedCategory || state.categories[0] || "";
+      if (!cat) {
+        toast("Create a category first.", "warning");
+        return;
+      }
       state.editing = {
         originalKey: null,
-        category: state.selectedCategory || state.categories[0] || "",
+        category: cat,
         date: dstr,
         slug: "",
         title: "",
         image: "",
         body: "",
       };
-      if (!state.editing.category) {
-        alert("Create a category first (+ new next to Categories).");
-        state.editing = null;
-        return;
-      }
       hydrateForm();
       renderPosts();
+      $("fTitle").focus();
     }
     function hydrateForm() {
       if (!state.editing) return;
-      fCategory.value = state.editing.category;
-      fDate.value = state.editing.date;
-      fTitle.value = state.editing.title;
-      fSlug.value = state.editing.slug;
-      fImage.value = state.editing.image;
-      fBody.value = state.editing.body;
-      editTitle.textContent = state.editing.originalKey ? state.editing.originalKey : "New post";
+      $("emptyState").style.display = "none";
+      $("editForm").style.display = "";
+      $("fCategory").value = state.editing.category;
+      $("fDate").value = state.editing.date;
+      $("fTitle").value = state.editing.title;
+      $("fSlug").value = state.editing.slug;
+      $("fImage").value = state.editing.image;
+      $("fBody").value = state.editing.body;
+      $("editTitle").textContent = state.editing.originalKey || "New post (draft)";
       updateEditorEnabled();
-      setMode("edit");
+      // Switch back to edit tab if user is on preview and starts editing new post.
+      const editTab = new bootstrap.Tab($("tab-edit"));
+      editTab.show();
+    }
+    function clearEditor() {
+      state.editing = null;
+      $("editForm").reset();
+      $("editForm").style.display = "none";
+      $("emptyState").style.display = "";
+      $("editTitle").textContent = "Pick a post from the list or click New.";
+      updateEditorEnabled();
     }
 
-    // Auto-slug from title only when creating a new post and slug is empty.
-    fTitle.addEventListener("input", () => {
-      if (state.editing && !state.editing.originalKey && !fSlug.dataset.touched) {
-        fSlug.value = slugify(fTitle.value);
+    $("fTitle").addEventListener("input", () => {
+      if (state.editing && !state.editing.originalKey && !$("fSlug").dataset.touched) {
+        $("fSlug").value = slugify($("fTitle").value);
       }
     });
-    fSlug.addEventListener("input", () => { fSlug.dataset.touched = "1"; });
+    $("fSlug").addEventListener("input", () => { $("fSlug").dataset.touched = "1"; });
 
-    $("newPostBtn").addEventListener("click", () => {
-      if (!state.authed) return openLoginDialog();
-      newPost();
-    });
+    $("newPostBtn").addEventListener("click", () => { if (!state.authed) return loginModal.show(); newPost(); });
+    $("emptyNewBtn").addEventListener("click", () => { if (!state.authed) return loginModal.show(); newPost(); });
 
-    saveBtn.addEventListener("click", async (e) => {
+    $("saveBtn").addEventListener("click", async (e) => {
       e.preventDefault();
-      if (!state.authed) return openLoginDialog();
+      if (!state.authed) return loginModal.show();
       if (!state.editing) return;
       const payload = {
-        category: fCategory.value,
-        date: fDate.value,
-        title: fTitle.value.trim(),
-        slug: fSlug.value.trim() || slugify(fTitle.value),
-        image: fImage.value.trim(),
-        body: fBody.value,
+        category: $("fCategory").value,
+        date: $("fDate").value,
+        title: $("fTitle").value.trim(),
+        slug: $("fSlug").value.trim() || slugify($("fTitle").value),
+        image: $("fImage").value.trim(),
+        body: $("fBody").value,
         originalKey: state.editing.originalKey || undefined,
       };
       if (!payload.title || !payload.slug || !payload.body.trim()) {
-        alert("Title, slug and body are required.");
+        toast("Title, slug and body are required.", "warning");
         return;
       }
-      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      const btn = $("saveBtn");
+      btn.disabled = true;
+      const prev = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving…';
       try {
         const res = await fetch("/api/blog/save", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
+        if (res.status === 401) { await refreshAuth(); loginModal.show(); return; }
         if (!res.ok) throw new Error(data.error || res.statusText);
         state.editing.originalKey = data.key;
         state.editing.category = payload.category;
@@ -418,49 +656,45 @@
         state.editing.title = payload.title;
         state.editing.image = payload.image;
         state.editing.body = payload.body;
-        editTitle.textContent = data.key + "  ·  saved";
+        $("editTitle").textContent = data.key;
         await loadPosts();
+        toast(`Saved. Live at ${data.url}`, "success");
       } catch (err) {
-        alert("Save failed: " + err.message);
+        toast("Save failed: " + err.message, "danger");
       } finally {
-        saveBtn.textContent = "Save"; updateEditorEnabled();
+        btn.innerHTML = prev;
+        updateEditorEnabled();
       }
     });
 
-    deleteBtn.addEventListener("click", async () => {
+    $("deleteBtn").addEventListener("click", async () => {
       if (!state.authed || !state.editing?.originalKey) return;
-      if (!confirm(`Delete ${state.editing.originalKey}?`)) return;
+      if (!confirm(`Delete post: ${state.editing.originalKey}?`)) return;
       const res = await fetch("/api/blog/delete", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: state.editing.originalKey }),
       });
-      if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
-      if (!res.ok) { const d = await res.json().catch(()=>({})); alert(d.error || "Delete failed"); return; }
-      state.editing = null;
-      editTitle.textContent = "Pick a post from the list or click “+ new post”.";
-      editForm.reset();
+      if (res.status === 401) { await refreshAuth(); loginModal.show(); return; }
+      if (!res.ok) { const d = await res.json().catch(()=>({})); toast(d.error || "Delete failed", "danger"); return; }
+      toast("Post deleted", "secondary");
+      clearEditor();
       await loadPosts();
-      updateEditorEnabled();
     });
 
-    // ---------- edit / preview toggle ----------
-    modeEdit.addEventListener("click", () => setMode("edit"));
-    modePreview.addEventListener("click", () => setMode("preview"));
-    function setMode(mode) {
-      const isPreview = mode === "preview";
-      modeEdit.classList.toggle("active", !isPreview);
-      modePreview.classList.toggle("active", isPreview);
-      editForm.hidden = isPreview;
-      editPreview.hidden = !isPreview;
-      if (isPreview) renderPreview();
-    }
-    function renderPreview() {
-      $("prevTitle").textContent = fTitle.value || "(untitled)";
-      $("prevMeta").textContent = `${fDate.value || ""} · ${fCategory.value || ""}`;
-      const img = $("prevImage");
-      if (fImage.value.trim()) { img.src = fImage.value.trim(); img.style.display = ""; }
-      else img.style.display = "none";
-      $("prevBody").innerHTML = renderMarkdown(fBody.value);
+    // ---------- preview ----------
+    $("tab-preview").addEventListener("shown.bs.tab", () => {
+      $("prevTitle").textContent = $("fTitle").value || "(untitled)";
+      $("prevCat").textContent = $("fCategory").value || "";
+      $("prevMeta").textContent = `${$("fDate").value || ""} · ${estimateReading($("fBody").value)} min read`;
+      const heroEl = $("prevHero");
+      const img = $("fImage").value.trim();
+      if (img) { heroEl.style.backgroundImage = `url('${img}')`; heroEl.style.display = ""; }
+      else { heroEl.style.display = "none"; }
+      $("prevBody").innerHTML = renderMarkdown($("fBody").value);
+    });
+    function estimateReading(md) {
+      const words = String(md || "").split(/\s+/).filter(Boolean).length;
+      return Math.max(1, Math.round(words / 200));
     }
 
     // ---------- boot ----------
