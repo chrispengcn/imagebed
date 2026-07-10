@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings · Imagebed</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>📷 Imagebed</h1>
+    <nav>
+      <a href="/">Gallery</a>
+      <a href="/generate.html">AI Generate</a>
+      <a href="/blog/">Blog</a>
+      <a href="/help.html">Help</a>
+    </nav>
+    <div class="spacer"></div>
+    <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <a id="settingsLink" class="ghost btn" href="/settings.html" style="display:none">⚙ Settings</a>
+    <button id="loginBtn" class="ghost">Login</button>
+  </header>
+
+  <main class="settings-wrap">
+    <h2>Settings</h2>
+    <p class="muted small" id="pwSource"></p>
+
+    <section class="settings-card" id="pwCard">
+      <h3>Change login password</h3>
+      <p class="muted small">
+        The new password is stored in R2 as a salted SHA-256 hash at the path
+        configured by <code>PASSWORD_PATH</code> in <code>wrangler.toml</code>.
+        On a fresh deploy — when that file doesn't exist yet — the default
+        login password is <code>123456</code>; change it here to materialise
+        the file. Changing it signs every other existing session out; you stay
+        signed in on this browser.
+      </p>
+
+      <form id="pwForm" class="pw-form">
+        <label>Current password
+          <div class="pw-row">
+            <input type="password" id="curPw" autocomplete="current-password" required />
+            <button type="button" class="ghost small-btn" data-toggle="curPw" title="Show / hide">👁</button>
+          </div>
+        </label>
+
+        <label>New password
+          <div class="pw-row">
+            <input type="password" id="newPw" autocomplete="new-password" minlength="8" required />
+            <button type="button" class="ghost small-btn" data-toggle="newPw" title="Show / hide">👁</button>
+            <button type="button" class="ghost small-btn" id="genBtn"  title="Generate a random 16-character password">🎲 Generate</button>
+            <button type="button" class="ghost small-btn" id="copyBtn" title="Copy new password to clipboard">📋 Copy</button>
+          </div>
+          <div class="muted small" id="strength" style="margin-top:4px"></div>
+        </label>
+
+        <label>Confirm new password
+          <div class="pw-row">
+            <input type="password" id="confPw" autocomplete="new-password" minlength="8" required />
+            <button type="button" class="ghost small-btn" data-toggle="confPw" title="Show / hide">👁</button>
+          </div>
+        </label>
+
+        <div id="pwError" class="err"></div>
+        <div id="pwOk" class="ok"></div>
+
+        <div class="actions">
+          <button type="submit" id="saveBtn">Save new password</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="settings-card" id="gateMsg" style="display:none">
+      <h3>Sign in required</h3>
+      <p>You need to sign in as admin to change the password.</p>
+      <button id="gateLogin">Login</button>
+    </section>
+  </main>
+
+  <dialog id="loginDialog">
+    <form method="dialog" id="loginForm">
+      <h3 style="margin:0 0 12px">Login</h3>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 12px">Enter the admin password.</p>
+      <input type="password" id="loginPw" placeholder="Password" autocomplete="current-password" required autofocus />
+      <div id="loginError" class="err"></div>
+      <div class="actions">
+        <button type="button" class="ghost" id="loginCancel">Cancel</button>
+        <button type="submit" id="loginSubmit">Login</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    // ---------- state / helpers ----------
+    const $ = (id) => document.getElementById(id);
+    const pwCard = $("pwCard");
+    const gateMsg = $("gateMsg");
+    const authState = $("authState");
+    const settingsLink = $("settingsLink");
+    const loginBtn = $("loginBtn");
+
+    let authed = false;
+
+    // Random 16-char password from the browser CSPRNG. Uses a 72-char alphabet
+    // (letters + digits + a curated set of symbols) — avoids ambiguous chars
+    // like O/0, I/l, `, ", ', \ and space.
+    const ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*_+-=?";
+    function generatePassword(len = 16) {
+      const buf = new Uint32Array(len);
+      crypto.getRandomValues(buf);
+      let out = "";
+      for (let i = 0; i < len; i++) out += ALPHABET[buf[i] % ALPHABET.length];
+      return out;
+    }
+
+    // Cheap strength heuristic. Not security-grade — just a UI hint.
+    function scoreStrength(pw) {
+      if (!pw) return "";
+      let score = 0;
+      if (pw.length >= 8)  score++;
+      if (pw.length >= 12) score++;
+      if (pw.length >= 16) score++;
+      if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+      if (/\d/.test(pw))   score++;
+      if (/[^\w]/.test(pw)) score++;
+      const labels = ["very weak", "weak", "ok", "good", "strong", "very strong"];
+      return `Strength: ${labels[Math.min(score, labels.length - 1)]} (${pw.length} chars)`;
+    }
+
+    async function copyToClipboard(text) {
+      if (!text) return false;
+      try { await navigator.clipboard.writeText(text); return true; }
+      catch {
+        // Fallback for insecure contexts / older browsers.
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.left = "-9999px";
+        document.body.appendChild(ta); ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch { /* ignore */ }
+        ta.remove();
+        return ok;
+      }
+    }
+
+    function flashOk(msg) {
+      const el = $("pwOk");
+      el.textContent = msg;
+      setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 3000);
+    }
+    function flashErr(msg) { $("pwError").textContent = msg; }
+
+    // ---------- auth boot ----------
+    async function refreshAuth() {
+      try {
+        const res = await fetch("/api/login");
+        const data = await res.json();
+        authed = !!data.authed;
+      } catch { authed = false; }
+      loginBtn.textContent = authed ? "Logout" : "Login";
+      authState.textContent = authed ? "Signed in" : "";
+      settingsLink.style.display = authed ? "" : "none";
+      pwCard.style.display = authed ? "" : "none";
+      gateMsg.style.display = authed ? "none" : "";
+      if (authed) loadStatus();
+    }
+    loginBtn.addEventListener("click", async () => {
+      if (authed) {
+        await fetch("/api/logout", { method: "POST" });
+        await refreshAuth();
+      } else openLoginDialog();
+    });
+    $("gateLogin").addEventListener("click", () => openLoginDialog());
+
+    async function loadStatus() {
+      try {
+        const res = await fetch("/api/settings/status");
+        if (!res.ok) return;
+        const data = await res.json();
+        $("pwSource").textContent = data.passwordSource === "stored"
+          ? "Current password: stored in R2 (previously changed here)."
+          : "Current password: default bootstrap password (123456). Change it now — a new password file will be written to the path configured in wrangler.toml.";
+      } catch { /* non-fatal */ }
+    }
+
+    // Login dialog wiring — same shape as other pages.
+    const loginDialog = $("loginDialog");
+    const loginForm   = $("loginForm");
+    const loginPw     = $("loginPw");
+    const loginError  = $("loginError");
+    $("loginCancel").addEventListener("click", () => loginDialog.close());
+    function openLoginDialog() {
+      loginError.textContent = ""; loginPw.value = "";
+      if (typeof loginDialog.showModal === "function") loginDialog.showModal();
+      else loginDialog.setAttribute("open", "");
+      setTimeout(() => loginPw.focus(), 0);
+    }
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.textContent = "";
+      const res = await fetch("/api/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: loginPw.value }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        loginError.textContent = data.error || `Login failed (${res.status})`;
+        return;
+      }
+      loginDialog.close();
+      await refreshAuth();
+    });
+
+    // ---------- password form wiring ----------
+    document.querySelectorAll("[data-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = $(btn.dataset.toggle);
+        input.type = input.type === "password" ? "text" : "password";
+        btn.textContent = input.type === "password" ? "👁" : "🙈";
+      });
+    });
+
+    $("genBtn").addEventListener("click", () => {
+      const pw = generatePassword(16);
+      $("newPw").value = pw;
+      $("confPw").value = pw;
+      // Reveal so the user can visually confirm what was generated.
+      for (const id of ["newPw", "confPw"]) {
+        const input = $(id); input.type = "text";
+        const tog = document.querySelector(`[data-toggle="${id}"]`);
+        if (tog) tog.textContent = "🙈";
+      }
+      $("strength").textContent = scoreStrength(pw);
+      flashOk("Generated a 16-character password. Copy it before saving.");
+      $("pwError").textContent = "";
+    });
+
+    $("copyBtn").addEventListener("click", async () => {
+      const pw = $("newPw").value;
+      if (!pw) return flashErr("Nothing to copy — generate or type a password first.");
+      $("pwError").textContent = "";
+      const ok = await copyToClipboard(pw);
+      flashOk(ok ? "Copied new password to clipboard." : "Copy failed — please copy manually.");
+    });
+
+    $("newPw").addEventListener("input", () => {
+      $("strength").textContent = scoreStrength($("newPw").value);
+    });
+
+    $("pwForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("pwError").textContent = ""; $("pwOk").textContent = "";
+      const current = $("curPw").value;
+      const next    = $("newPw").value;
+      const conf    = $("confPw").value;
+      if (!current) return flashErr("Please enter your current password.");
+      if (next.length < 8) return flashErr("New password must be at least 8 characters.");
+      if (next !== conf) return flashErr("New password and confirmation do not match.");
+      if (next === current) return flashErr("New password must differ from the current one.");
+
+      const saveBtn = $("saveBtn");
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      try {
+        const res = await fetch("/api/settings/password", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ current, next }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401 && data.error === "login required") {
+          await refreshAuth();
+          return flashErr("Session expired. Please sign in again.");
+        }
+        if (!res.ok) return flashErr(data.error || `Failed (${res.status})`);
+        // Success: keep the new password on screen for the user to copy if
+        // they didn't already, but clear the "current" field.
+        $("curPw").value = "";
+        flashOk("Password updated. Any other logged-in sessions have been signed out.");
+        loadStatus();
+      } catch (err) {
+        flashErr(err.message || "Failed to save password.");
+      } finally {
+        saveBtn.disabled = false; saveBtn.textContent = "Save new password";
+      }
+    });
+
+    refreshAuth();
+  </script>
+</body>
+</html>

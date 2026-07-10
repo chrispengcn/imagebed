@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blog Manager · Imagebed</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>📷 Imagebed</h1>
+    <nav>
+      <a href="/">Gallery</a>
+      <a href="/generate.html">AI Generate</a>
+      <a href="/blog/">Blog</a>
+      <a href="/blog-edit.html" class="active">Manage</a>
+      <a href="/help.html">Help</a>
+    </nav>
+    <div class="spacer"></div>
+    <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <a id="settingsLink" class="ghost btn" href="/settings.html" style="display:none" title="Change password">⚙ Settings</a>
+    <button id="loginBtn" class="ghost">Login</button>
+  </header>
+
+  <div class="blog-edit-wrap">
+    <!-- Left: category + post list -->
+    <aside class="blog-edit-side">
+      <div class="side-block">
+        <div class="side-block-head">
+          <strong>Categories</strong>
+          <button class="ghost" id="newCatBtn" title="Create category">+ new</button>
+        </div>
+        <div id="catList" class="cat-list"><div class="muted small">Loading…</div></div>
+      </div>
+
+      <div class="side-block">
+        <div class="side-block-head">
+          <strong>Posts</strong>
+          <button class="ghost" id="newPostBtn">+ new post</button>
+        </div>
+        <input type="search" id="listSearch" placeholder="Search title / body…" style="width:100%;margin-bottom:8px" />
+        <div id="postList" class="post-list-editor"><div class="muted small">Loading…</div></div>
+        <div class="pager">
+          <button class="ghost" id="prevBtn" disabled>← Prev</button>
+          <span id="pageInfo" class="muted small"></span>
+          <button class="ghost" id="nextBtn" disabled>Next →</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right: editor -->
+    <section class="blog-edit-main">
+      <div class="edit-toolbar">
+        <span id="editTitle" class="muted">Pick a post from the list or click “+ new post”.</span>
+        <div class="spacer"></div>
+        <div class="mode-toggle">
+          <button class="ghost active" id="modeEdit">Edit</button>
+          <button class="ghost" id="modePreview">Preview</button>
+        </div>
+        <button class="ghost" id="saveBtn" disabled>Save</button>
+        <button class="danger" id="deleteBtn" disabled>Delete</button>
+      </div>
+
+      <form class="edit-form" id="editForm">
+        <div class="edit-row">
+          <label>Category
+            <select id="fCategory" required></select>
+          </label>
+          <label>Date
+            <input type="date" id="fDate" required />
+          </label>
+        </div>
+        <div class="edit-row">
+          <label style="flex:2">Title
+            <input type="text" id="fTitle" placeholder="Post title" required />
+          </label>
+          <label style="flex:1">Slug
+            <input type="text" id="fSlug" placeholder="url-slug" required />
+          </label>
+        </div>
+        <label>Featured image URL
+          <input type="text" id="fImage" placeholder="e.g. /file/photos/hero.jpg" />
+        </label>
+        <label>Body (Markdown)
+          <textarea id="fBody" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…"></textarea>
+        </label>
+      </form>
+
+      <div class="edit-preview" id="editPreview" hidden>
+        <article class="blog-wrap post">
+          <h1 id="prevTitle"></h1>
+          <p class="post-meta" id="prevMeta"></p>
+          <img class="post-feature" id="prevImage" style="display:none" />
+          <div class="post-body" id="prevBody"></div>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="loginDialog">
+    <form method="dialog" id="loginForm">
+      <h3 style="margin:0 0 12px">Login</h3>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
+        Enter the admin password to manage blog posts.
+      </p>
+      <input type="password" id="loginPw" placeholder="Password" autocomplete="current-password" required autofocus />
+      <div id="loginError" class="err"></div>
+      <div class="actions">
+        <button type="button" class="ghost" id="loginCancel">Cancel</button>
+        <button type="submit" id="loginSubmit">Login</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module">
+    import { renderMarkdown } from "/markdown.js";
+
+    // ---------- state ----------
+    const state = {
+      authed: false,
+      categories: [],
+      posts: [],        // page currently in view
+      total: 0,
+      offset: 0,
+      limit: 20,        // client page size; server cap is 100
+      q: "",
+      selectedCategory: "",  // filter for listing
+      editing: null,    // {key?, category, date, slug, title, image, body, originalKey?}
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const listEl = $("postList");
+    const catListEl = $("catList");
+    const editTitle = $("editTitle");
+    const saveBtn = $("saveBtn");
+    const deleteBtn = $("deleteBtn");
+    const authState = $("authState");
+    const loginBtn = $("loginBtn");
+
+    const fCategory = $("fCategory");
+    const fDate = $("fDate");
+    const fTitle = $("fTitle");
+    const fSlug = $("fSlug");
+    const fImage = $("fImage");
+    const fBody = $("fBody");
+
+    const modeEdit = $("modeEdit");
+    const modePreview = $("modePreview");
+    const editForm = $("editForm");
+    const editPreview = $("editPreview");
+
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+    function slugify(s) {
+      return String(s || "")
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^\w\s-]+/g, "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .replace(/-{2,}/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 80);
+    }
+
+    // ---------- auth ----------
+    async function refreshAuth() {
+      try {
+        const res = await fetch("/api/login");
+        const data = await res.json();
+        state.authed = !!data.authed;
+      } catch { state.authed = false; }
+      loginBtn.textContent = state.authed ? "Logout" : "Login";
+      authState.textContent = state.authed ? "Signed in" : "";
+      document.getElementById("settingsLink").style.display = state.authed ? "" : "none";
+      updateEditorEnabled();
+    }
+    loginBtn.addEventListener("click", async () => {
+      if (state.authed) { await fetch("/api/logout", { method: "POST" }); await refreshAuth(); }
+      else openLoginDialog();
+    });
+    const loginDialog = $("loginDialog");
+    const loginForm = $("loginForm");
+    const loginPw = $("loginPw");
+    const loginError = $("loginError");
+    $("loginCancel").addEventListener("click", () => loginDialog.close());
+    function openLoginDialog() {
+      loginError.textContent = ""; loginPw.value = "";
+      if (typeof loginDialog.showModal === "function") loginDialog.showModal();
+      else loginDialog.setAttribute("open", "");
+      setTimeout(() => loginPw.focus(), 0);
+    }
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.textContent = "";
+      const res = await fetch("/api/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: loginPw.value }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        loginError.textContent = data.error || `Login failed (${res.status})`;
+        return;
+      }
+      loginDialog.close();
+      await refreshAuth();
+      await loadAll();
+    });
+
+    function updateEditorEnabled() {
+      const canEdit = state.authed && !!state.editing;
+      saveBtn.disabled = !canEdit;
+      deleteBtn.disabled = !canEdit || !state.editing?.originalKey;
+      [fCategory, fDate, fTitle, fSlug, fImage, fBody].forEach((el) => {
+        el.disabled = !state.authed;
+      });
+    }
+
+    // ---------- categories ----------
+    async function loadCategories() {
+      try {
+        const res = await fetch("/api/blog/categories");
+        const data = await res.json();
+        state.categories = data.categories || [];
+      } catch { state.categories = []; }
+      renderCategories();
+      // Refresh the <select> in the editor.
+      const cur = fCategory.value;
+      fCategory.innerHTML = state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+      if (cur && state.categories.includes(cur)) fCategory.value = cur;
+    }
+    function renderCategories() {
+      let html = `<a class="cat-chip${state.selectedCategory === "" ? " active" : ""}" data-cat="">All</a>`;
+      for (const c of state.categories) {
+        html += `<a class="cat-chip${state.selectedCategory === c ? " active" : ""}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</a>`;
+      }
+      catListEl.innerHTML = html || `<div class="muted small">No categories yet. Create one to publish a post.</div>`;
+    }
+    catListEl.addEventListener("click", (e) => {
+      const chip = e.target.closest(".cat-chip");
+      if (!chip) return;
+      state.selectedCategory = chip.dataset.cat;
+      state.offset = 0;
+      renderCategories();
+      loadPosts();
+    });
+    $("newCatBtn").addEventListener("click", async () => {
+      if (!state.authed) return openLoginDialog();
+      const name = prompt("New category name:");
+      if (!name) return;
+      const res = await fetch("/api/blog/category", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), action: "create" }),
+      });
+      if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `Failed (${res.status})`);
+        return;
+      }
+      await loadCategories();
+    });
+
+    // ---------- posts list ----------
+    async function loadPosts() {
+      listEl.innerHTML = `<div class="muted small">Loading…</div>`;
+      const params = new URLSearchParams();
+      if (state.selectedCategory) params.set("category", state.selectedCategory);
+      if (state.q) params.set("q", state.q);
+      params.set("limit", String(state.limit));
+      params.set("offset", String(state.offset));
+      try {
+        const res = await fetch("/api/blog/list?" + params);
+        const data = await res.json();
+        state.posts = data.items || [];
+        state.total = data.total || 0;
+      } catch (e) {
+        listEl.innerHTML = `<div class="err">Failed to load: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      renderPosts();
+    }
+    function renderPosts() {
+      if (!state.posts.length) {
+        listEl.innerHTML = `<div class="muted small">No posts.</div>`;
+      } else {
+        listEl.innerHTML = state.posts.map((p) => `
+          <div class="post-list-row${state.editing?.originalKey === p.key ? " active" : ""}" data-key="${escapeHtml(p.key)}">
+            <div class="row-title">${escapeHtml(p.title)}</div>
+            <div class="row-meta">${escapeHtml(p.date)} · ${escapeHtml(p.category)}</div>
+          </div>
+        `).join("");
+      }
+      const from = state.total === 0 ? 0 : state.offset + 1;
+      const to = Math.min(state.total, state.offset + state.posts.length);
+      $("pageInfo").textContent = state.total ? `${from}–${to} of ${state.total}` : "";
+      $("prevBtn").disabled = state.offset <= 0;
+      $("nextBtn").disabled = state.offset + state.limit >= state.total;
+    }
+    listEl.addEventListener("click", (e) => {
+      const row = e.target.closest(".post-list-row");
+      if (!row) return;
+      openPost(row.dataset.key);
+    });
+    $("prevBtn").addEventListener("click", () => { state.offset = Math.max(0, state.offset - state.limit); loadPosts(); });
+    $("nextBtn").addEventListener("click", () => { state.offset += state.limit; loadPosts(); });
+
+    let searchDeb;
+    $("listSearch").addEventListener("input", (e) => {
+      clearTimeout(searchDeb);
+      searchDeb = setTimeout(() => {
+        state.q = e.target.value.trim();
+        state.offset = 0;
+        loadPosts();
+      }, 250);
+    });
+
+    // ---------- editor ----------
+    async function openPost(key) {
+      try {
+        const res = await fetch("/api/blog/post?key=" + encodeURIComponent(key));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        state.editing = {
+          originalKey: key,
+          category: data.category,
+          date: data.date,
+          slug: data.slug,
+          title: data.title,
+          image: data.image || "",
+          body: data.body || "",
+        };
+      } catch (e) {
+        alert("Failed to load post: " + e.message);
+        return;
+      }
+      hydrateForm();
+      renderPosts();
+    }
+    function newPost() {
+      const today = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const dstr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+      state.editing = {
+        originalKey: null,
+        category: state.selectedCategory || state.categories[0] || "",
+        date: dstr,
+        slug: "",
+        title: "",
+        image: "",
+        body: "",
+      };
+      if (!state.editing.category) {
+        alert("Create a category first (+ new next to Categories).");
+        state.editing = null;
+        return;
+      }
+      hydrateForm();
+      renderPosts();
+    }
+    function hydrateForm() {
+      if (!state.editing) return;
+      fCategory.value = state.editing.category;
+      fDate.value = state.editing.date;
+      fTitle.value = state.editing.title;
+      fSlug.value = state.editing.slug;
+      fImage.value = state.editing.image;
+      fBody.value = state.editing.body;
+      editTitle.textContent = state.editing.originalKey ? state.editing.originalKey : "New post";
+      updateEditorEnabled();
+      setMode("edit");
+    }
+
+    // Auto-slug from title only when creating a new post and slug is empty.
+    fTitle.addEventListener("input", () => {
+      if (state.editing && !state.editing.originalKey && !fSlug.dataset.touched) {
+        fSlug.value = slugify(fTitle.value);
+      }
+    });
+    fSlug.addEventListener("input", () => { fSlug.dataset.touched = "1"; });
+
+    $("newPostBtn").addEventListener("click", () => {
+      if (!state.authed) return openLoginDialog();
+      newPost();
+    });
+
+    saveBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (!state.authed) return openLoginDialog();
+      if (!state.editing) return;
+      const payload = {
+        category: fCategory.value,
+        date: fDate.value,
+        title: fTitle.value.trim(),
+        slug: fSlug.value.trim() || slugify(fTitle.value),
+        image: fImage.value.trim(),
+        body: fBody.value,
+        originalKey: state.editing.originalKey || undefined,
+      };
+      if (!payload.title || !payload.slug || !payload.body.trim()) {
+        alert("Title, slug and body are required.");
+        return;
+      }
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      try {
+        const res = await fetch("/api/blog/save", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        state.editing.originalKey = data.key;
+        state.editing.category = payload.category;
+        state.editing.date = payload.date;
+        state.editing.slug = payload.slug;
+        state.editing.title = payload.title;
+        state.editing.image = payload.image;
+        state.editing.body = payload.body;
+        editTitle.textContent = data.key + "  ·  saved";
+        await loadPosts();
+      } catch (err) {
+        alert("Save failed: " + err.message);
+      } finally {
+        saveBtn.textContent = "Save"; updateEditorEnabled();
+      }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!state.authed || !state.editing?.originalKey) return;
+      if (!confirm(`Delete ${state.editing.originalKey}?`)) return;
+      const res = await fetch("/api/blog/delete", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: state.editing.originalKey }),
+      });
+      if (res.status === 401) { await refreshAuth(); return openLoginDialog(); }
+      if (!res.ok) { const d = await res.json().catch(()=>({})); alert(d.error || "Delete failed"); return; }
+      state.editing = null;
+      editTitle.textContent = "Pick a post from the list or click “+ new post”.";
+      editForm.reset();
+      await loadPosts();
+      updateEditorEnabled();
+    });
+
+    // ---------- edit / preview toggle ----------
+    modeEdit.addEventListener("click", () => setMode("edit"));
+    modePreview.addEventListener("click", () => setMode("preview"));
+    function setMode(mode) {
+      const isPreview = mode === "preview";
+      modeEdit.classList.toggle("active", !isPreview);
+      modePreview.classList.toggle("active", isPreview);
+      editForm.hidden = isPreview;
+      editPreview.hidden = !isPreview;
+      if (isPreview) renderPreview();
+    }
+    function renderPreview() {
+      $("prevTitle").textContent = fTitle.value || "(untitled)";
+      $("prevMeta").textContent = `${fDate.value || ""} · ${fCategory.value || ""}`;
+      const img = $("prevImage");
+      if (fImage.value.trim()) { img.src = fImage.value.trim(); img.style.display = ""; }
+      else img.style.display = "none";
+      $("prevBody").innerHTML = renderMarkdown(fBody.value);
+    }
+
+    // ---------- boot ----------
+    async function loadAll() {
+      await Promise.all([loadCategories(), loadPosts()]);
+    }
+    (async function boot() {
+      await refreshAuth();
+      await loadAll();
+    })();
+  </script>
+</body>
+</html>

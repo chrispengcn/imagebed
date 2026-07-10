@@ -12,11 +12,13 @@
     <nav>
       <a href="/">Gallery</a>
       <a href="/generate.html" class="active">AI Generate</a>
+      <a href="/blog/">Blog</a>
       <a href="/help.html">Help</a>
     </nav>
     <div class="spacer"></div>
     <span style="color:var(--muted);font-size:12px" id="modelBadge">—</span>
     <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <a id="settingsLink" class="ghost btn" href="/settings.html" style="display:none" title="Change password">⚙ Settings</a>
     <button id="loginBtn" class="ghost">Login</button>
   </header>
 
@@ -92,6 +94,7 @@
       } catch { authed = false; }
       loginBtn.textContent = authed ? "Logout" : "Login";
       authState.textContent = authed ? "Signed in" : "";
+      document.getElementById("settingsLink").style.display = authed ? "" : "none";
       submit.disabled = false;
       submit.title = authed ? "" : "Login required to generate";
     }

@@ -12,6 +12,15 @@ bucket_name = "imagebed"
 [ai]
 binding = "AI"
 
-# ADMIN_PASSWORD is set as a secret (NOT here in plaintext). Create with:
-#   npx wrangler pages secret put ADMIN_PASSWORD --project-name imagebed
-# When ADMIN_PASSWORD is unset, upload/delete/generate return 503.
+# ---- Login password ----
+# The admin password is stored in R2 at the path below, as a salted SHA-256
+# hash. Pick a hard-to-guess path (this value is embedded in the deploy
+# metadata and never exposed to the client), and change it if you ever suspect
+# the value has leaked. `/file/*` and `/api/list` refuse to serve this path,
+# but "unguessable" is still your first line of defense.
+#
+# If the file does not exist yet, the default password is `123456` — visit
+# /settings.html and change it immediately after the first deploy. Rotating
+# the password via /settings.html creates or overwrites this file.
+[vars]
+PASSWORD_PATH = "admin/pass-oiuvyuoawue543262U"

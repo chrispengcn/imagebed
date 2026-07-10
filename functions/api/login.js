@@ -1,18 +1,19 @@
 // POST /api/login  — body: {password}
-// GET  /api/login  — returns {authed: bool} without exposing the password
+// GET  /api/login  — returns {authed: bool, configured: bool} without exposing the password
 import { verifyPassword, issueCookie, isAuthed } from "../_auth.js";
+import { isConfigured } from "../_admin.js";
 
 export async function onRequestGet({ env, request }) {
   return Response.json({
     authed: await isAuthed(env, request),
-    configured: !!env.ADMIN_PASSWORD,
+    configured: await isConfigured(env),
   });
 }
 
 export async function onRequestPost({ env, request }) {
-  if (!env.ADMIN_PASSWORD) {
+  if (!(await isConfigured(env))) {
     return Response.json(
-      { error: "ADMIN_PASSWORD is not configured on the server" },
+      { error: "PASSWORD_PATH is not configured in wrangler.toml" },
       { status: 503 }
     );
   }

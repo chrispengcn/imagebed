@@ -12,10 +12,12 @@
     <nav>
       <a href="/" class="active">Gallery</a>
       <a href="/generate.html">AI Generate</a>
+      <a href="/blog/">Blog</a>
       <a href="/help.html">Help</a>
     </nav>
     <div class="spacer"></div>
     <span id="authState" style="color:var(--muted);font-size:12px"></span>
+    <a id="settingsLink" class="ghost btn" href="/settings.html" style="display:none" title="Change password">⚙ Settings</a>
     <button id="uploadBtn" title="Requires login">Upload</button>
     <button id="loginBtn" class="ghost">Login</button>
     <input type="file" id="fileInput" multiple hidden />
@@ -132,6 +134,7 @@
       uploadBtn.disabled = !authed;
       uploadBtn.title = authed ? "Upload files to the current folder" : "Login required to upload";
       authState.textContent = authed ? "Signed in" : "";
+      document.getElementById("settingsLink").style.display = authed ? "" : "none";
       // Delete button gets re-evaluated per-selection; refresh if something is selected.
       if (selected) selectItem(selected.key);
     }
