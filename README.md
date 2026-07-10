@@ -39,16 +39,25 @@ wrangler.toml       R2 + AI bindings
 
 ## Deploy
 
-Prereqs: a Cloudflare account and the `wrangler` CLI.
+Repo: https://github.com/chrispengcn/imagebed
+
+Prereqs: a Cloudflare account and the `wrangler` CLI (`npm i -g wrangler` or use `npx`).
 
 ```sh
-# 1. Create the R2 bucket
+# 0. Clone the project
+git clone https://github.com/chrispengcn/imagebed.git
+cd imagebed
+
+# 1. Install dependencies (wrangler)
+npm install
+
+# 2. Create the R2 bucket
 npx wrangler r2 bucket create imagebed
 
-# 2. Publish to Pages
+# 3. Publish to Pages
 npm run deploy
 
-# 3. Set the admin password (this becomes the login password)
+# 4. Set the admin password (this becomes the login password)
 npx wrangler pages secret put ADMIN_PASSWORD --project-name imagebed
 # Paste the password when prompted; wrangler stores it encrypted.
 ```
@@ -111,16 +120,25 @@ wrangler.toml       R2 + AI 绑定配置
 
 ## 部署
 
-前置条件：一个 Cloudflare 账号和 `wrangler` CLI。
+仓库地址：https://github.com/chrispengcn/imagebed
+
+前置条件：一个 Cloudflare 账号和 `wrangler` CLI（`npm i -g wrangler` 或使用 `npx`）。
 
 ```sh
-# 1. 创建 R2 存储桶
+# 0. 克隆项目
+git clone https://github.com/chrispengcn/imagebed.git
+cd imagebed
+
+# 1. 安装依赖（wrangler）
+npm install
+
+# 2. 创建 R2 存储桶
 npx wrangler r2 bucket create imagebed
 
-# 2. 发布到 Pages
+# 3. 发布到 Pages
 npm run deploy
 
-# 3. 设置管理员密码（此密码即为登录密码）
+# 4. 设置管理员密码（此密码即为登录密码）
 npx wrangler pages secret put ADMIN_PASSWORD --project-name imagebed
 # 按提示粘贴密码；wrangler 会加密存储。
 ```
