@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Help · Imagebed</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .help-wrap {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 24px 20px 60px;
+      line-height: 1.7;
+      color: var(--text);
+    }
+    .help-wrap h2 {
+      margin-top: 28px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .help-wrap h3 { margin-top: 20px; }
+    .help-wrap a { color: var(--accent); text-decoration: none; }
+    .help-wrap a:hover { text-decoration: underline; }
+    .help-wrap ol, .help-wrap ul { padding-left: 22px; }
+    .help-wrap code {
+      background: var(--panel-2);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 90%;
+    }
+    .info-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 18px 0;
+    }
+    .info-card p { margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📷 Imagebed</h1>
+    <nav>
+      <a href="/">Gallery</a>
+      <a href="/generate.html">AI Generate</a>
+      <a href="/help.html" class="active">Help</a>
+    </nav>
+    <div class="spacer"></div>
+  </header>
+
+  <main class="help-wrap">
+    <h2>About the author</h2>
+    <div class="info-card">
+      <p><strong>Author site:</strong> <a href="https://shopaii.net" target="_blank" rel="noopener">https://shopaii.net</a></p>
+      <p>Focused on website development and Google SEO.</p>
+      <p><strong>GitHub project:</strong> <a href="https://github.com/chrispengcn/imagebed" target="_blank" rel="noopener">https://github.com/chrispengcn/imagebed</a></p>
+    </div>
+
+    <h2>How to use the image bed</h2>
+    <p>This image bed is deployed on Cloudflare Pages + R2. It supports image/video uploads, folder management, in-browser previews, and AI image generation. The most common operations are described below.</p>
+
+    <h3>1. Login</h3>
+    <ol>
+      <li>Click the <strong>Login</strong> button in the top-right corner.</li>
+      <li>Enter the admin password in the dialog, then click <strong>Login</strong>.</li>
+      <li>Once signed in, the header shows <em>Signed in</em>, and the <strong>Upload</strong> / <strong>Delete</strong> buttons become active.</li>
+      <li>To sign out, click <strong>Logout</strong> in the top-right corner.</li>
+    </ol>
+
+    <h3>2. Upload files</h3>
+    <ol>
+      <li>On the <strong>Gallery</strong> page, navigate to the folder you want to upload into using the breadcrumbs (<code>root / photos / …</code>).</li>
+      <li>After logging in, click the <strong>Upload</strong> button in the top-right and pick one or more files.</li>
+      <li>Or simply <strong>drag and drop</strong> files onto the dashed drop zone ("Drop files here to upload") on the left — they will be uploaded to the current folder.</li>
+      <li>Once the upload finishes, files appear in the list immediately. You can preview them on the right and copy the public link.</li>
+    </ol>
+
+    <h3>3. Create a folder</h3>
+    <ol>
+      <li>On the <strong>Gallery</strong> page, click <strong>+ new</strong> at the right end of the breadcrumb bar.</li>
+      <li>Enter a folder name in the prompt (letters, digits, underscores, dashes and <code>/</code> are allowed) and confirm.</li>
+      <li>The page switches into the new folder automatically; subsequent uploads will be saved there.</li>
+      <li>Note: folders in R2 are purely logical — a folder only truly exists once it contains at least one file.</li>
+    </ol>
+
+    <h3>4. Delete a file</h3>
+    <ol>
+      <li>Make sure you are logged in.</li>
+      <li>Click the file you want to remove in the left-hand list; the preview appears on the right.</li>
+      <li>Click the red <strong>Delete</strong> button on the far right of the preview toolbar.</li>
+      <li>Confirm in the dialog to permanently remove the file from R2.</li>
+    </ol>
+
+    <h3>5. AI image generation &amp; model selection</h3>
+    <ol>
+      <li>Switch to the <strong>AI Generate</strong> tab in the top navigation.</li>
+      <li>Pick a Cloudflare Workers AI image model from the <strong>Model</strong> dropdown at the top of the left form. The parameters supported by that model (steps, guidance, size, seed, etc.) update dynamically.</li>
+      <li>Type your description into <strong>Prompt</strong>. Optionally add a <strong>Negative prompt</strong> to describe what you don't want.</li>
+      <li>Adjust width/height, steps, seed and other parameters as needed.</li>
+      <li>Click <strong>Generate</strong> and wait for the result to appear in the preview area on the right.</li>
+      <li>Use <strong>Save to R2</strong> to store the generated image directly into the image bed, or <strong>Download</strong> to save it locally.</li>
+      <li>Note: AI generation also requires you to be logged in.</li>
+    </ol>
+
+    <h3>FAQ</h3>
+    <ul>
+      <li><strong>Upload/delete returns 401:</strong> your session has expired — click Login and sign in again.</li>
+      <li><strong>Newly uploaded file doesn't show up:</strong> click the <strong>↻</strong> refresh button in the list toolbar.</li>
+      <li><strong>Copying links:</strong> select a file and click <strong>Copy link</strong> — you can paste the URL directly into blogs, forums, or Markdown.</li>
+    </ul>
+  </main>
+</body>
+</html>
