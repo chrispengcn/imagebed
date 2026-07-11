@@ -12,14 +12,19 @@
 //   slug      (optional) — derived from title if omitted
 //   image     (optional) — featured image URL
 //   body      (required) — the markdown source
+//   overwrite (optional) — truthy value replaces an existing post at the
+//                          same category+date+slug (use it to edit-in-place
+//                          from scripts); default is 409 conflict.
 //
-// Example (Python):
-//   import requests
-//   r = requests.post("https://…/api/newpost", json={
-//       "password": "…", "category": "news", "date": "2026-07-11",
-//       "title": "Hello", "body": "# Hello\n\nFirst post."
-//   })
-//   print(r.json())     # -> {"key": "...", "url": "/blog/news/..."}
+// Example (Python) — publish:
+//   requests.post("…/api/newpost", json={
+//       "password":"…","category":"news","date":"2026-07-11",
+//       "title":"Hello","body":"# Hello"})
+//
+// Example (Python) — republish / edit the same post:
+//   requests.post("…/api/newpost", json={
+//       "password":"…","category":"news","date":"2026-07-11",
+//       "title":"Hello","body":"# Updated body","overwrite": True})
 
 import { verifyPassword } from "../_auth.js";
 import { makePostKey, normalizeCategory, normalizeDate, slugifySeg, keyToUrl } from "./blog/_lib.js";
@@ -80,13 +85,14 @@ export async function onRequestPost({ env, request }) {
   try { key = makePostKey({ category, date, slug }); }
   catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
 
-  // Refuse to silently overwrite an existing post with the same date+slug.
-  // Scripts that want to update in place can call /api/blog/save with a
-  // valid session cookie and an originalKey.
+  // By default refuse to overwrite an existing post with the same date+slug;
+  // callers that mean to edit-in-place must set overwrite=true. Accept the
+  // usual truthy shapes since this comes in as either JSON or form-encoded.
+  const overwrite = isTruthy(data.overwrite);
   const existing = await env.BUCKET.head(key);
-  if (existing) {
+  if (existing && !overwrite) {
     return Response.json({
-      error: "a post with this date+slug already exists in that category",
+      error: "a post with this date+slug already exists in that category; pass overwrite=true to replace it",
       key,
     }, { status: 409 });
   }
@@ -108,7 +114,20 @@ export async function onRequestPost({ env, request }) {
   const origin = new URL(request.url).origin;
   await rebuildSitemap(env, origin);
 
-  return Response.json({ key, url: keyToUrl(key) });
+  return Response.json({
+    key,
+    url: keyToUrl(key),
+    replaced: !!existing,   // false = new post, true = overwrote an existing one
+  });
+}
+
+// Loose truthiness — accepts booleans, strings, numbers, since this field
+// arrives from JSON, multipart, or form-urlencoded bodies interchangeably.
+function isTruthy(v) {
+  if (v === true) return true;
+  if (v == null || v === false) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "on";
 }
 
 // ---------- HTML form ----------
@@ -193,6 +212,13 @@ function renderPage() {
             <textarea name="body" class="form-control" spellcheck="false" placeholder="# Hello&#10;&#10;Write your post here…" required></textarea>
           </div>
 
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="overwrite" value="true" id="overwrite"/>
+            <label class="form-check-label small" for="overwrite">
+              Overwrite if a post with the same category + date + slug already exists (use to edit-in-place)
+            </label>
+          </div>
+
           <div id="alert" class="alert d-none" role="alert"></div>
 
           <div class="d-grid">
@@ -260,14 +286,34 @@ function renderPage() {
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (!res.ok) { showAlert(data.error || "Publish failed", "danger"); return; }
+        if (!res.ok) {
+          if (res.status === 409) {
+            // Give the user a one-click retry that flips overwrite=true and
+            // resubmits, so "oh I meant to update it" is a single interaction.
+            const el = $("alert");
+            el.className = "alert alert-warning";
+            el.innerHTML =
+              (data.error || "Conflict") +
+              ' <button type="button" class="btn btn-sm btn-warning ms-2" id="retryOverwrite">Overwrite &amp; retry</button>';
+            el.classList.remove("d-none");
+            document.getElementById("retryOverwrite").addEventListener("click", () => {
+              $("overwrite").checked = true;
+              e.target.requestSubmit();
+            });
+            return;
+          }
+          showAlert(data.error || "Publish failed", "danger");
+          return;
+        }
         showAlert(
-          'Published. <a href="' + data.url + '" target="_blank" class="alert-link">' + data.url + '</a>',
+          (data.replaced ? "Replaced. " : "Published. ") +
+            '<a href="' + data.url + '" target="_blank" class="alert-link">' + data.url + '</a>',
           "success",
           true
         );
         // Clear only the body so it's easy to fire off another post in the
-        // same category.
+        // same category. Leave the overwrite checkbox as-is (users editing a
+        // series of posts often want it to stay on).
         e.target.body.value = "";
         e.target.title.value = "";
         e.target.slug.value = "";

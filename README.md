@@ -187,9 +187,12 @@ Accepts **either** JSON or multipart/form-data.
 | `slug`     | no  | auto-derived from `title` if omitted |
 | `image`    | no  | featured image URL |
 | `body`     | yes | markdown source |
+| `overwrite`| no  | truthy value replaces an existing post at the same category+date+slug (edit-in-place); default is a `409` conflict |
 
-Refuses to overwrite an existing `date+slug` in the same category (returns
-`409`). Use the logged-in editor at `/blog-edit.html` for edits.
+Without `overwrite`, hitting the same `category+date+slug` twice returns `409`
+so you don't silently clobber a post. Pass `overwrite=true` (or `"true"`,
+`"1"`, `"yes"`) to edit-in-place — the response includes `"replaced": true`
+so scripts can log the difference.
 
 ```python
 import requests
@@ -203,7 +206,17 @@ r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
     "body":     "# Hello\n\nFirst post from Python.",
 })
 print(r.json())
-# -> {"key":"blog/news/2026-07-11-hello-world.md","url":"/blog/news/2026-07-11-hello-world/"}
+# -> {"key":"blog/news/2026-07-11-hello-world.md",
+#     "url":"/blog/news/2026-07-11-hello-world/",
+#     "replaced": false}
+
+# To edit the same post in-place, resend with overwrite=True:
+r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
+    "password": "…", "category": "news", "date": "2026-07-11",
+    "title": "Hello world", "body": "# Hello\n\nUpdated body.",
+    "overwrite": True,
+})
+print(r.json())   # -> { ..., "replaced": true }
 ```
 
 Publishing also regenerates `/sitemap.xml`.
@@ -401,9 +414,11 @@ print(r.json())
 | `slug`     | 否 | 缺省根据 `title` 生成 |
 | `image`    | 否 | 特色图 URL |
 | `body`     | 是 | Markdown 正文 |
+| `overwrite`| 否 | 真值时允许覆盖同一分类下同 `date+slug` 的既有文章（实现修改效果）；缺省时返回 `409` |
 
-如果同一分类下已经存在相同 `date+slug`，会返回 `409` 拒绝覆盖。修改已有文章
-请用登录后的 `/blog-edit.html`。
+不带 `overwrite`，同一 `category+date+slug` 第二次上传会返回 `409`，避免误覆盖。
+想直接改现有文章，把 `overwrite=true`（或 `"true"` / `"1"` / `"yes"`）加进请求即可 ——
+响应会带 `"replaced": true`，方便脚本区分新建和更新。
 
 ```python
 import requests
@@ -417,7 +432,17 @@ r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
     "body":     "# Hello\n\n来自 Python 的第一篇文章。",
 })
 print(r.json())
-# -> {"key":"blog/news/2026-07-11-hello-world.md","url":"/blog/news/2026-07-11-hello-world/"}
+# -> {"key":"blog/news/2026-07-11-hello-world.md",
+#     "url":"/blog/news/2026-07-11-hello-world/",
+#     "replaced": false}
+
+# 想改这篇文章，重发时带 overwrite=True：
+r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
+    "password": "……", "category": "news", "date": "2026-07-11",
+    "title": "Hello world", "body": "# Hello\n\n更新后的正文。",
+    "overwrite": True,
+})
+print(r.json())   # -> { ..., "replaced": true }
 ```
 
 发布时会自动重建 `/sitemap.xml`。
