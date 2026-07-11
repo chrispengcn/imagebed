@@ -40,6 +40,8 @@ functions/
   api/upload.js       POST /api/upload      (multipart, field=file[, folder])  [auth]
   api/delete.js       POST /api/delete      {key} or {keys}                    [auth]
   api/generate.js     POST /api/generate    {model, prompt, folder?, save?, …} [auth]
+  api/uploadimg.js    GET  /api/uploadimg  (hidden form) · POST (password-in-body, scriptable)
+  api/newpost.js      GET  /api/newpost    (hidden form) · POST (password-in-body, scriptable)
   api/blog/list.js    GET  /api/blog/list?category=&q=&limit=&offset=
   api/blog/categories.js  GET  /api/blog/categories
   api/blog/post.js    GET  /api/blog/post?key=blog/<cat>/<file>.md
@@ -139,6 +141,73 @@ new path. The old R2 file (at the previous path) is now orphaned; delete it via
 the R2 dashboard or `npx wrangler r2 object delete imagebed/<old-path>` if you
 want a clean bucket.
 
+## Hidden quick-upload endpoints (scriptable)
+
+Two hidden URLs let you upload images or publish posts by putting the password
+directly in the request body — no login cookie, no session juggling. They're
+deliberately not linked from any nav, not in the sitemap, and served with
+`X-Robots-Tag: noindex, nofollow`. Each URL doubles as an interactive HTML
+form (GET) and a JSON/multipart API endpoint (POST).
+
+### `/api/uploadimg` — upload one or more images
+
+Fields (multipart form-data):
+
+| field | required | notes |
+|---|---|---|
+| `password` | yes | matches the current admin password |
+| `folder` | no | virtual folder prefix, e.g. `photos/2026` (blank = root) |
+| `file` | yes | can be repeated for multiple files in one request |
+
+```python
+import requests
+
+r = requests.post("https://imgbed.shopaii.net/api/uploadimg", data={
+    "password": "…your password…",
+    "folder": "photos/2026",
+}, files=[
+    ("file", ("a.jpg", open("a.jpg", "rb"), "image/jpeg")),
+    ("file", ("b.png", open("b.png", "rb"), "image/png")),
+])
+print(r.json())
+# -> {"uploaded":[{"key":"photos/2026/…_a.jpg","size":…,"url":"/file/…"}, …],
+#     "folder":"photos/2026"}
+```
+
+### `/api/newpost` — publish a blog post
+
+Accepts **either** JSON or multipart/form-data.
+
+| field | required | notes |
+|---|---|---|
+| `password` | yes | matches the current admin password |
+| `category` | yes | R2 folder for the post; created lazily |
+| `date`     | yes | `YYYY-MM-DD` |
+| `title`    | yes | |
+| `slug`     | no  | auto-derived from `title` if omitted |
+| `image`    | no  | featured image URL |
+| `body`     | yes | markdown source |
+
+Refuses to overwrite an existing `date+slug` in the same category (returns
+`409`). Use the logged-in editor at `/blog-edit.html` for edits.
+
+```python
+import requests
+
+r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
+    "password": "…your password…",
+    "category": "news",
+    "date":     "2026-07-11",
+    "title":    "Hello world",
+    "image":    "/file/photos/2026/hero.jpg",  # optional
+    "body":     "# Hello\n\nFirst post from Python.",
+})
+print(r.json())
+# -> {"key":"blog/news/2026-07-11-hello-world.md","url":"/blog/news/2026-07-11-hello-world/"}
+```
+
+Publishing also regenerates `/sitemap.xml`.
+
 ## Notes
 
 - **Auth model:** one password, stored in R2 as a salted SHA-256 hash at the key from `PASSWORD_PATH` in `wrangler.toml`. On a fresh deploy — or any time that R2 file is missing — the fallback password is `123456`; log in and rotate it from `/settings.html`. Login issues an HMAC-signed session cookie tied to the current password; rotating the password invalidates every other existing session (the caller's cookie is re-signed so they stay signed in). `/file/*` and `/api/list` refuse to serve or expose the `PASSWORD_PATH` object. See [Resetting the password](#resetting-the-password) for the two reset paths.
@@ -191,6 +260,8 @@ functions/
   api/upload.js       POST /api/upload      (multipart，字段=file[, folder])  [需登录]
   api/delete.js       POST /api/delete      {key} 或 {keys}                    [需登录]
   api/generate.js     POST /api/generate    {model, prompt, folder?, save?, …} [需登录]
+  api/uploadimg.js    GET  /api/uploadimg  (隐藏表单页) · POST（密码写在请求体，可脚本化）
+  api/newpost.js      GET  /api/newpost    (隐藏表单页) · POST（密码写在请求体，可脚本化）
   api/blog/list.js    GET  /api/blog/list?category=&q=&limit=&offset=
   api/blog/categories.js   GET  /api/blog/categories
   api/blog/post.js    GET  /api/blog/post?key=blog/<分类>/<文件>.md
@@ -284,6 +355,72 @@ npm run deploy
 登录，立刻打开 `/settings.html` 设置新密码 —— 这个动作会向新路径写入加盐哈希。
 旧路径下的文件不会再被使用，如果需要清理，可以在 R2 面板或用命令
 `npx wrangler r2 object delete imagebed/<旧路径>` 删掉。
+
+## 隐藏的快速上传端点（可脚本化）
+
+两个隐藏 URL 允许你把密码直接放在请求里上传图片或发布文章 —— 不需要登录 cookie、
+不需要维护会话。它们**没有**在任何导航中出现，**不进** sitemap，返回头带
+`X-Robots-Tag: noindex, nofollow`。每个 URL 既是浏览器打开的可视表单（GET），
+也是脚本可以 POST 的 JSON/multipart 端点。
+
+### `/api/uploadimg` —— 上传一张或多张图片
+
+字段（multipart/form-data）：
+
+| 字段 | 是否必填 | 说明 |
+|---|---|---|
+| `password` | 是 | 当前管理员密码 |
+| `folder` | 否 | 目标文件夹前缀，如 `photos/2026`（留空 = 根目录） |
+| `file` | 是 | 可重复出现，实现一次上传多张 |
+
+```python
+import requests
+
+r = requests.post("https://imgbed.shopaii.net/api/uploadimg", data={
+    "password": "……你的密码……",
+    "folder": "photos/2026",
+}, files=[
+    ("file", ("a.jpg", open("a.jpg", "rb"), "image/jpeg")),
+    ("file", ("b.png", open("b.png", "rb"), "image/png")),
+])
+print(r.json())
+# -> {"uploaded":[{"key":"photos/2026/…_a.jpg","size":…,"url":"/file/…"}, …],
+#     "folder":"photos/2026"}
+```
+
+### `/api/newpost` —— 发布一篇博客文章
+
+同时接受 **JSON** 或 **multipart/form-data**。
+
+| 字段 | 是否必填 | 说明 |
+|---|---|---|
+| `password` | 是 | 当前管理员密码 |
+| `category` | 是 | 分类目录名，不存在会自动创建 |
+| `date`     | 是 | `YYYY-MM-DD` |
+| `title`    | 是 | |
+| `slug`     | 否 | 缺省根据 `title` 生成 |
+| `image`    | 否 | 特色图 URL |
+| `body`     | 是 | Markdown 正文 |
+
+如果同一分类下已经存在相同 `date+slug`，会返回 `409` 拒绝覆盖。修改已有文章
+请用登录后的 `/blog-edit.html`。
+
+```python
+import requests
+
+r = requests.post("https://imgbed.shopaii.net/api/newpost", json={
+    "password": "……你的密码……",
+    "category": "news",
+    "date":     "2026-07-11",
+    "title":    "Hello world",
+    "image":    "/file/photos/2026/hero.jpg",  # 可选
+    "body":     "# Hello\n\n来自 Python 的第一篇文章。",
+})
+print(r.json())
+# -> {"key":"blog/news/2026-07-11-hello-world.md","url":"/blog/news/2026-07-11-hello-world/"}
+```
+
+发布时会自动重建 `/sitemap.xml`。
 
 ## 说明
 
