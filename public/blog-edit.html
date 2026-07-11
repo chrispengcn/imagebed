@@ -487,6 +487,14 @@
         await refreshAuth();
         await loadAll();
         toast("Signed in", "success");
+
+        // If we arrived via a ?key= deep link (e.g. from the "Edit post"
+        // button on a blog page) and had to detour through login, jump
+        // straight to the post now.
+        const wantKey = new URLSearchParams(location.search).get("key");
+        if (wantKey && /^blog\/[^/]+\/\d{4}-\d{2}-\d{2}-.+\.md$/.test(wantKey)) {
+          await openPost(wantKey);
+        }
       } catch (err) {
         $("loginError").textContent = err.message || "Login failed";
       }
@@ -783,6 +791,16 @@
     (async function boot() {
       await refreshAuth();
       await loadAll();
+
+      // Deep link: /blog-edit.html?key=blog/<cat>/<file>.md — auto-open that
+      // post in the editor, so the "Edit post" button on a public post page
+      // lands the author directly on the right file. Requires login; if the
+      // viewer isn't signed in we surface the login modal first.
+      const wantKey = new URLSearchParams(location.search).get("key");
+      if (wantKey && /^blog\/[^/]+\/\d{4}-\d{2}-\d{2}-.+\.md$/.test(wantKey)) {
+        if (!state.authed) { loginModal.show(); return; }
+        await openPost(wantKey);
+      }
     })();
   </script>
 </body>

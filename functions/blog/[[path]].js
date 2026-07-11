@@ -19,6 +19,7 @@
 
 import { loadPost, listAllPostObjects, listCategories, keyToUrl, categoryUrl, ROOT } from "../api/blog/_lib.js";
 import { renderMarkdown, escHtml, escAttr, excerpt as makeExcerpt } from "../_markdown.js";
+import { isAuthed } from "../_auth.js";
 
 const BS_CSS = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css";
 const BS_JS  = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js";
@@ -29,35 +30,41 @@ export async function onRequestGet({ env, request, params }) {
   let segs = Array.isArray(raw) ? [...raw] : raw ? [raw] : [];
   while (segs.length && segs[segs.length - 1] === "") segs.pop();
 
-  if (segs.length === 0) return renderIndex(env, url);
+  // Whether the current viewer is signed in — determines whether we show
+  // the "Edit post" shortcut on the post page. Computed once up front so
+  // each render helper doesn't have to redo the HMAC.
+  const authed = await isAuthed(env, request);
+
+  if (segs.length === 0) return renderIndex(env, url, authed);
 
   if (segs.length === 1) {
     if (!url.pathname.endsWith("/")) {
       return Response.redirect(url.origin + url.pathname + "/" + url.search, 308);
     }
-    return renderCategory(env, url, decodeURIComponent(segs[0]));
+    return renderCategory(env, url, decodeURIComponent(segs[0]), authed);
   }
 
   if (segs.length === 2) {
     if (!url.pathname.endsWith("/")) {
       return Response.redirect(url.origin + url.pathname + "/" + url.search, 308);
     }
-    return renderPost(env, url, decodeURIComponent(segs[0]), decodeURIComponent(segs[1]));
+    return renderPost(env, url, decodeURIComponent(segs[0]), decodeURIComponent(segs[1]), authed);
   }
 
-  return html(404, page({ title: "Not found · Blog", activeCategory: "", categories: [],
+  return html(404, page({ title: "Not found · Blog", activeCategory: "", categories: [], authed,
     body: `<div class="container py-5"><h1 class="h3">Not found</h1><p><a href="/blog/">← Back to blog</a></p></div>` }));
 }
 
 // ---------- pages ----------
 
-async function renderIndex(env, url) {
+async function renderIndex(env, url, authed) {
   const categories = await listCategories(env);
   const q = (url.searchParams.get("q") || "").trim();
   return html(200, page({
     title: "Blog · Imagebed",
     activeCategory: "",
     categories,
+    authed,
     canonical: url.origin + "/blog/",
     description: "All posts on the Imagebed blog, newest first.",
     body: listShell({
@@ -71,13 +78,14 @@ async function renderIndex(env, url) {
   }));
 }
 
-async function renderCategory(env, url, category) {
+async function renderCategory(env, url, category, authed) {
   const categories = await listCategories(env);
   if (!categories.includes(category)) {
     return html(404, page({
       title: `Category not found · Blog`,
       activeCategory: "",
       categories,
+      authed,
       body: `<div class="container py-5">
         <h1 class="h3">Category not found</h1>
         <p class="text-muted">No such category: <code>${escHtml(category)}</code></p>
@@ -90,6 +98,7 @@ async function renderCategory(env, url, category) {
     title: `${category} · Blog · Imagebed`,
     activeCategory: category,
     categories,
+    authed,
     canonical: url.origin + categoryUrl(category),
     description: `Posts filed under “${category}”.`,
     body: listShell({
@@ -103,7 +112,7 @@ async function renderCategory(env, url, category) {
   }));
 }
 
-async function renderPost(env, url, category, postName) {
+async function renderPost(env, url, category, postName, authed) {
   const key = `${ROOT}${category}/${postName}.md`;
   const post = await loadPost(env, key);
   const categories = await listCategories(env);
@@ -111,6 +120,7 @@ async function renderPost(env, url, category, postName) {
     return html(404, page({
       title: `Post not found · Blog`,
       activeCategory: category,
+      authed,
       categories,
       body: `<div class="container py-5">
         <h1 class="h3">Post not found</h1>
@@ -178,6 +188,8 @@ async function renderPost(env, url, category, postName) {
     title: `${post.title} · Blog · Imagebed`,
     activeCategory: post.category,
     categories,
+    authed,
+    editKey: post.key,     // Lets the navbar render an "Edit post" shortcut when signed in.
     canonical,
     extraHead: meta,
     body,
@@ -186,7 +198,7 @@ async function renderPost(env, url, category, postName) {
 
 // ---------- shell ----------
 
-function page({ title, activeCategory, categories, canonical, description, extraHead, body }) {
+function page({ title, activeCategory, categories, canonical, description, extraHead, body, authed, editKey }) {
   return `<!doctype html>
 <html lang="en" data-bs-theme="light">
 <head>
@@ -201,7 +213,7 @@ function page({ title, activeCategory, categories, canonical, description, extra
   <link href="/blog.css" rel="stylesheet"/>
 </head>
 <body class="blog-body">
-  ${renderNav(activeCategory, categories)}
+  ${renderNav(activeCategory, categories, authed, editKey)}
   ${body}
   ${renderFooter()}
   <script src="${BS_JS}" defer></script>
@@ -209,12 +221,21 @@ function page({ title, activeCategory, categories, canonical, description, extra
 </html>`;
 }
 
-function renderNav(activeCategory, categories) {
+function renderNav(activeCategory, categories, authed, editKey) {
   const catItems = (categories || []).slice(0, 8).map((c) => {
     const active = c === activeCategory ? " active" : "";
     return `<li><a class="dropdown-item${active}" href="${escAttr(categoryUrl(c))}">${escHtml(c)}</a></li>`;
   }).join("");
   const hasCats = (categories || []).length > 0;
+
+  // "Edit post" — only rendered on a post page AND only when the viewer's
+  // session cookie is valid. `authed` is derived server-side from the same
+  // HMAC used by /api/blog/save, so this button is never a lie.
+  const editBtn = (authed && editKey)
+    ? `<a class="btn btn-warning btn-sm me-2" href="/blog-edit.html?key=${encodeURIComponent(editKey)}" title="Open this post in the editor">
+         <i class="bi bi-pencil-fill"></i> Edit post
+       </a>`
+    : "";
 
   return `
   <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
@@ -242,6 +263,7 @@ function renderNav(activeCategory, categories) {
           ` : ""}
           <li class="nav-item"><a class="nav-link" href="/help.html">Help</a></li>
         </ul>
+        ${editBtn}
         <a class="btn btn-outline-primary btn-sm" href="/blog-edit.html">
           <i class="bi bi-pencil-square"></i> Manage
         </a>
@@ -411,7 +433,11 @@ function html(status, body) {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "cache-control": "public, max-age=60",
+      // `private` — this HTML embeds a per-user Edit button based on the
+      // session cookie, so the shared CDN edge must not cache it and serve
+      // one user's version to another. The browser is still allowed to
+      // reuse its own copy for 60 s.
+      "cache-control": "private, max-age=60",
     },
   });
 }
